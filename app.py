@@ -8,24 +8,23 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import google.generativeai as genai
-from PIL import Image
 from pdf2image import convert_from_bytes
 import openpyxl
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.styles import PatternFill, Font, Alignment
 
 # ==========================================
 # 1. โครงสร้างข้อมูลมาตรฐาน (Pydantic Schema)
 # ==========================================
 class RecordEntry(BaseModel):
-    date_raw: str = Field(description="วันเดือนปีที่ปรากฏในเอกสาร เช่น '1 เม.ย. 54' หรือ '1 เม.ย. 2554'")
-    position_and_workplace: str = Field(description="ตำแหน่ง/หน่วยงาน/วิทยฐานะ/การเลื่อนขั้น")
+    date_raw: str = Field(default="", description="วันเดือนปีที่ปรากฏในเอกสาร เช่น '1 เม.ย. 54' หรือ '1 เม.ย. 2554'")
+    position_and_workplace: str = Field(default="", description="ตำแหน่ง/หน่วยงาน/วิทยฐานะ/การเลื่อนขั้น")
     position_no: Optional[str] = Field(default="", description="เลขที่ตำแหน่ง เช่น '5693', '3332'")
     academic_standing: Optional[str] = Field(default="", description="วิทยฐานะ เช่น 'ชำนาญการ', 'ชำนาญการพิเศษ'")
     salary: Optional[float] = Field(default=0.0, description="อัตราเงินเดือน (ตัวเลขเท่านั้น ไม่ใส่ลูกน้ำ) เช่น 25190, 33800")
     order_ref: Optional[str] = Field(default="", description="เอกสารอ้างอิง/คำสั่ง เช่น 'คส.สพป.มค.2 ที่ 199/54 ลว. 18 เม.ย. 54'")
 
 class KP7ExtractionResult(BaseModel):
-    records: List[RecordEntry] = Field(description="รายการประวัติการรับเงินเดือนและตำแหน่งทั้งหมด เรียงตามลำดับที่ปรากฏในหน้าเอกสาร")
+    records: List[RecordEntry] = Field(default=[], description="รายการประวัติการรับเงินเดือนและตำแหน่งทั้งหมด เรียงตามลำดับที่ปรากฏในหน้าเอกสาร")
 
 # ==========================================
 # 2. ฟังก์ชันช่วยแปลงและเตรียมข้อมูล (Normalization Engine)
@@ -44,6 +43,18 @@ THAI_MONTHS = {
     "พ.ย.": 11, "พย": 11, "พฤศจิกายน": 11,
     "ธ.ค.": 12, "ธค": 12, "ธันวาคม": 12
 }
+
+def clean_json_text(text: str) -> str:
+    """ลบ Markdown Codeblock ครอบ JSON ออกอย่างปลอดภัย"""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # ตัดบรรทัดแรก (```json) และบรรทัดสุดท้าย (```) ออก
+        if len(lines) > 2 and lines[-1].strip().startswith("```"):
+            text = "\n".join(lines[1:-1])
+        elif len(lines) > 1:
+            text = "\n".join(lines[1:])
+    return text.strip()
 
 def normalize_thai_date(date_str: str):
     if not date_str or not isinstance(date_str, str):
@@ -75,12 +86,11 @@ def normalize_thai_date(date_str: str):
     return date_formatted, sort_key
 
 # ==========================================
-# 3. VLM Data Extraction Engine (ระบบสกัดข้อมูลยืดหยุ่นสูง)
+# 3. VLM Data Extraction Engine (Gemini API)
 # ==========================================
 def extract_data_from_pdf(pdf_bytes: bytes, api_key: str, model_name: str, file_type_hint: str) -> List[dict]:
     genai.configure(api_key=api_key)
     
-    # กำหนดค่าโมเดล
     try:
         model = genai.GenerativeModel(
             model_name=model_name,
@@ -91,7 +101,6 @@ def extract_data_from_pdf(pdf_bytes: bytes, api_key: str, model_name: str, file_
             }
         )
     except Exception:
-        # Fallback กรณีโมเดลบางรุ่นไม่รองรับ response_schema
         model = genai.GenerativeModel(
             model_name=model_name,
             generation_config={"temperature": 0.0}
@@ -107,7 +116,7 @@ def extract_data_from_pdf(pdf_bytes: bytes, api_key: str, model_name: str, file_
     คำสั่งการทำงาน:
     1. สกัดข้อมูลประวัติการดำรงตำแหน่งและอัตราเงินเดือนทุกแถว (Row) ให้ครบถ้วน 100% ห้ามข้ามแม้แต่แถวเดียว
     2. สำหรับเอกสารเขียนมือ ให้อ่านลายมือภาษาไทย ตัวเลขไทย/อารบิก และสัญลักษณ์ย่ออย่างแม่นยำ
-    3. ส่งผลลัพธ์เป็น JSON ในรูปแบบนี้เท่านั้น:
+    3. ส่งผลลัพธ์เป็น JSON โครงสร้างนี้เท่านั้น:
     {{
       "records": [
         {{
@@ -124,16 +133,15 @@ def extract_data_from_pdf(pdf_bytes: bytes, api_key: str, model_name: str, file_
     
     for idx, img in enumerate(images):
         response = model.generate_content([prompt, img])
-        text_resp = response.text.strip()
+        cleaned_text = clean_json_text(response.text)
         
-        # ตัด Markdown code block ออก (ถ้ามี)
-        if "```json" in text_resp:
-            text_resp = re.search(r"```json\s*(.*?)\s*```", text_resp, re.DOTALL).group(1)
-        elif "```" in text_resp:
-            text_resp = re.search(r"```\s*(.*?)\s*```", text_resp, re.DOTALL).group(1)
+        try:
+            res_json = json.loads(cleaned_text)
+            records = res_json.get("records", [])
+        except Exception:
+            records = []
             
-        res_json = json.loads(text_resp)
-        for row in res_json.get("records", []):
+        for row in records:
             norm_date, sort_key = normalize_thai_date(row.get("date_raw", ""))
             row["normalized_date"] = norm_date
             row["sort_key"] = sort_key
@@ -149,7 +157,6 @@ def reconcile_records(records_a: List[dict], records_b: List[dict]):
     df_a = pd.DataFrame(records_a)
     df_b = pd.DataFrame(records_b)
     
-    # 1. ตรวจสอบการเรียงลำดับเวลา (Timeline Inversion)
     def check_timeline(df, name):
         warnings = []
         if not df.empty and 'sort_key' in df.columns:
@@ -157,21 +164,19 @@ def reconcile_records(records_a: List[dict], records_b: List[dict]):
                 if df.iloc[i]['sort_key'] < df.iloc[i-1]['sort_key'] and df.iloc[i]['sort_key'] != 0:
                     warnings.append({
                         "row": i + 1,
-                        "date": df.iloc[i]['date_raw'],
-                        "prev_date": df.iloc[i-1]['date_raw'],
-                        "msg": f"พบวันที่เรียงย้อนหลัง ({df.iloc[i]['date_raw']} อยู่หลัง {df.iloc[i-1]['date_raw']})"
+                        "date": df.iloc[i].get('date_raw', '-'),
+                        "prev_date": df.iloc[i-1].get('date_raw', '-'),
+                        "msg": f"พบวันที่เรียงย้อนหลัง ({df.iloc[i].get('date_raw', '-')} อยู่หลัง {df.iloc[i-1].get('date_raw', '-')})"
                     })
         return warnings
 
     inversions_a = check_timeline(df_a, "ไฟล์ 1 (ก.พ.7 อิเล็กทรอนิกส์)")
     inversions_b = check_timeline(df_b, "ไฟล์ 2 (ก.ค.ศ.16 เขียนมือ)")
 
-    # 2. ตรวจหารายการซ้ำซ้อนในตัวเอง (Duplicate Records)
     dup_a = pd.DataFrame()
     if not df_a.empty and 'normalized_date' in df_a.columns and 'salary' in df_a.columns:
         dup_a = df_a[df_a.duplicated(subset=['normalized_date', 'salary'], keep=False)]
     
-    # 3. Two-Way Comparison Matching
     all_keys = set()
     for r in records_a:
         all_keys.add((r['normalized_date'], r.get('salary', 0)))
@@ -295,14 +300,19 @@ with st.sidebar:
     if gemini_api_key:
         try:
             genai.configure(api_key=gemini_api_key)
-            # ดึงรายชื่อโมเดลที่ใช้งานได้จริงจาก API Key
             valid_models = [
                 m.name for m in genai.list_models() 
-                if 'generateContent' in m.supported_generation_methods
+                if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name.lower()
             ]
             if valid_models:
-                st.success(f"เชื่อมต่อ API สำเร็จ (พบ {len(valid_models)} โมเดล)")
-                selected_model = st.selectbox("เลือกโมเดล AI ที่ต้องการใช้:", valid_models, index=0)
+                st.success(f"เชื่อมต่อสำเร็จ (พบ {len(valid_models)} โมเดล)")
+                # ดึงตัวเลือกเริ่มต้น
+                default_idx = 0
+                for i, name in enumerate(valid_models):
+                    if "flash" in name.lower():
+                        default_idx = i
+                        break
+                selected_model = st.selectbox("เลือกโมเดล AI ที่ต้องการใช้:", valid_models, index=default_idx)
             else:
                 st.warning("ไม่พบโมเดล generateContent ในบัญชีนี้")
         except Exception as e:
