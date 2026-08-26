@@ -91,7 +91,7 @@ def normalize_thai_date(date_str: str):
 def extract_data_from_pdf(pdf_bytes: bytes, api_key: str, file_type_hint: str) -> List[dict]:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-pro",
+        model_name="gemini-1.5-flash",
         generation_config={
             "response_mime_type": "application/json",
             "response_schema": KP7ExtractionResult,
