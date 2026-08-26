@@ -11,6 +11,12 @@
 \setdefaultlanguage{thai}
 \setotherlanguage{english}
 
+% เปิดใช้การตัดคำภาษาไทยแบบพจนานุกรมของ XeTeX (ICU) — จำเป็นมาก!
+% ถ้าไม่เปิด บรรทัดข้อความไทยที่ไม่มีช่องว่าง (พบได้ทั่วไป โดยเฉพาะในช่องตาราง
+% แคบ ๆ) จะไม่ตัดคำเลยและล้นออกนอกกรอบ/คอลัมน์แทนที่จะขึ้นบรรทัดใหม่
+\XeTeXlinebreaklocale "th"
+\XeTeXlinebreakskip = 0pt plus 1pt minus 0.1pt
+
 % ฟอนต์หลัก TH Sarabun New — อัปโหลดไฟล์ฟอนต์ลง fonts/ เช่นเดียวกับเทมเพลต 5 บท
 \setmainfont{TH Sarabun New}[
   Path = fonts/,

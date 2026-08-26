@@ -9,6 +9,12 @@
 \setdefaultlanguage{thai}
 \setotherlanguage{english}
 
+% เปิดใช้การตัดคำภาษาไทยแบบพจนานุกรมของ XeTeX (ICU) — จำเป็นมาก!
+% ถ้าไม่เปิด บรรทัดข้อความไทยที่ไม่มีช่องว่าง (พบได้ทั่วไป โดยเฉพาะในช่องตาราง
+% แคบ ๆ) จะไม่ตัดคำเลยและล้นออกนอกกรอบ/คอลัมน์แทนที่จะขึ้นบรรทัดใหม่
+\XeTeXlinebreaklocale "th"
+\XeTeXlinebreakskip = 0pt plus 1pt minus 0.1pt
+
 % ฟอนต์หลัก TH Sarabun New ตามมาตรฐานราชการไทย (มติ ครม.)
 % หากใช้ Overleaf: อัปโหลดไฟล์ฟอนต์ THSarabunNew.ttf / THSarabunNew Bold.ttf ฯลฯ
 % ไปไว้ในโฟลเดอร์ fonts/ ของโปรเจกต์ (ดาวน์โหลดฟรีจาก SIPA/ f0nt.com)
