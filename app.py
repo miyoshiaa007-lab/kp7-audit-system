@@ -90,8 +90,29 @@ def normalize_thai_date(date_str: str):
 # ==========================================
 def extract_data_from_pdf(pdf_bytes: bytes, api_key: str, file_type_hint: str) -> List[dict]:
     genai.configure(api_key=api_key)
+    
+    # 1. ค้นหาและเลือกโมเดลที่ใช้งานได้จริงใน API Key อัตโนมัติ
+    available_models = [
+        m.name for m in genai.list_models() 
+        if 'generateContent' in m.supported_generation_methods
+    ]
+    
+    # เลือกลำดับความสำคัญ: Flash -> Pro -> ตัวใดก็ได้ที่รองรับ
+    chosen_model = None
+    for priority in ["gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-flash-002", "gemini-2.0-flash", "gemini-1.5-pro"]:
+        for m in available_models:
+            if priority in m:
+                chosen_model = m
+                break
+        if chosen_model:
+            break
+            
+    if not chosen_model:
+        chosen_model = available_models[0] if available_models else "models/gemini-1.5-flash"
+    
+    # 2. เรียกใช้งานโมเดลที่ผ่านการตรวจรับสิทธิ์
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name=chosen_model,
         generation_config={
             "response_mime_type": "application/json",
             "response_schema": KP7ExtractionResult,
