@@ -1,0 +1,51 @@
+% =============================================================================
+% main.tex — เทมเพลตรายงานวิจัย 5 บท ตามมาตรฐานวิชาการไทย (กคศ./สพฐ.)
+% คอมไพล์ด้วย XeLaTeX (Overleaf: Menu > Compiler > XeLaTeX)
+% ลำดับคอมไพล์แนะนำ: xelatex -> biber -> xelatex -> xelatex
+% =============================================================================
+\documentclass[12pt,a4paper,oneside]{report}
+\input{preamble}
+
+\begin{document}
+
+% ---------------- หน้าปก (ไม่แสดงเลขหน้า) ----------------
+\input{cover}
+
+% ---------------- ส่วนหน้า: เลขหน้าพยัญชนะไทย ก ข ค ... ----------------
+\thaifrontmatter
+
+\input{approval}
+\clearpage
+\input{abstract_th}
+\clearpage
+\input{abstract_en}
+\clearpage
+\input{acknowledgement}
+\clearpage
+
+\tableofcontents
+\clearpage
+\listoftables
+\clearpage
+\listoffigures
+
+% ---------------- เนื้อหา: เลขหน้าอารบิก 1 2 3 ... ----------------
+\mainbodymatter
+\setcounter{chapter}{0}
+
+\input{chapters/chapter1}
+\input{chapters/chapter2}
+\input{chapters/chapter3}
+\input{chapters/chapter4}
+\input{chapters/chapter5}
+
+\clearpage
+\input{bibliography}
+
+\clearpage
+\input{appendix}
+
+\clearpage
+\input{cv}
+
+\end{document}

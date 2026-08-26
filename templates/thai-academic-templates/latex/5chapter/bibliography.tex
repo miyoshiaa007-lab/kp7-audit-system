@@ -1,0 +1,14 @@
+% bibliography.tex — บรรณานุกรม
+\begin{center}
+{\hOneSize บรรณานุกรม}
+\end{center}
+\vspace{6pt}
+
+% รายการอ้างอิงถูกดึงจาก references.bib โดยอัตโนมัติ (เรียงตามลำดับตัวอักษรตามสไตล์ APA)
+% ให้เพิ่มรายการอ้างอิงใน references.bib แล้วอ้างอิงในเนื้อหาด้วย \cite{key} หรือ \parencite{key}
+\printbibliography[title={}, heading=none]
+
+% หากไม่ต้องการใช้ biblatex/biber ให้ลบสองบรรทัดข้างบน แล้วพิมพ์รายการบรรณานุกรมด้วยมือ
+% โดยเรียงตามลำดับตัวอักษร แยกภาษาไทยและภาษาอังกฤษ เช่น:
+%
+% \noindent\hangindent=1.25cm [ชื่อผู้แต่ง]. (ปีที่พิมพ์). \textit{ชื่อเรื่อง}. สถานที่พิมพ์: สำนักพิมพ์.

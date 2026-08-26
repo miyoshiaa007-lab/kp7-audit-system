@@ -1,0 +1,135 @@
+% =============================================================================
+% preamble.tex — การตั้งค่าส่วนหัวสำหรับเทมเพลต "ผลงานทางวิชาการ / รายงานผลการปฏิบัติงาน
+% ตามข้อตกลงในการพัฒนางาน (PA)" คอมไพล์ด้วย XeLaTeX หรือ LuaLaTeX เท่านั้น
+% (ใช้ preamble.tex ชุดเดียวกับ ../5chapter/preamble.tex เป็นฐาน ปรับส่วนหัวข้อให้
+%  ไม่ใช้ \chapter อัตโนมัติ เพราะ PA ใช้โครงสร้าง "ส่วนที่ / ด้านที่ / ตัวชี้วัดที่" แทน)
+% =============================================================================
+
+% ---------- ฟอนต์ภาษาไทย ----------
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{thai}
+\setotherlanguage{english}
+
+% ฟอนต์หลัก TH Sarabun New — อัปโหลดไฟล์ฟอนต์ลง fonts/ เช่นเดียวกับเทมเพลต 5 บท
+\setmainfont{TH Sarabun New}[
+  Path = fonts/,
+  Extension = .ttf,
+  UprightFont = *,
+  BoldFont = * Bold,
+  ItalicFont = * Italic,
+  BoldItalicFont = * Bold Italic,
+]
+% ทางเลือกสำรอง: \setmainfont{Sarabun}
+
+% ---------- ขนาดหน้ากระดาษ/ระยะขอบ (ตรงตามไฟล์ตัวอย่างที่แนบ) ----------
+\usepackage[a4paper,
+  top=3.00cm, bottom=2.54cm, left=3.81cm, right=2.54cm,
+  headsep=1.25cm, footskip=1.25cm]{geometry}
+
+% ---------- ขนาดตัวอักษรมาตรฐาน ----------
+\newcommand{\bodysize}{\fontsize{16}{24}\selectfont}
+\newcommand{\hThreeSize}{\fontsize{16}{24}\selectfont\bfseries}
+\newcommand{\hTwoSize}{\fontsize{18}{27}\selectfont\bfseries}
+\newcommand{\hOneSize}{\fontsize{20}{30}\selectfont\bfseries}
+\AtBeginDocument{\bodysize}
+
+% ---------- ระยะบรรทัด/ย่อหน้า ----------
+\usepackage{setspace}
+\setstretch{1.25}
+\usepackage{indentfirst}
+\setlength{\parindent}{1.25cm}
+
+% ---------- หัวข้อของ PA: "ส่วนที่ / ด้านที่ / ตัวชี้วัดที่" (ไม่ใช้เลขอัตโนมัติแบบบท) ----------
+\newcommand{\paparttitle}[1]{%
+  \addcontentsline{toc}{section}{#1}%
+  {\hOneSize\centering #1\par}}
+\newcommand{\padomaintitle}[1]{%
+  \addcontentsline{toc}{subsection}{#1}%
+  {\hTwoSize\centering #1\par}}
+\newcommand{\paheading}[1]{%
+  \addcontentsline{toc}{subsubsection}{#1}%
+  \vspace{12pt}{\hTwoSize #1\par}\vspace{6pt}}
+\newcommand{\pasubheading}[1]{\vspace{6pt}{\hThreeSize #1\par}\vspace{6pt}}
+\setcounter{tocdepth}{3}
+
+% กล่อง placeholder สำหรับแทรกภาพความสำเร็จ/หลักฐานเชิงประจักษ์
+\newcommand{\paphotobox}{%
+  \begin{center}
+  \fboxsep=8pt\fboxrule=0.5pt
+  \fcolorbox{gray}{white}{%
+    \parbox[c][2.2cm]{0.85\linewidth}{\centering\small\color{gray!70!black}
+      (พื้นที่สำหรับภาพความสำเร็จ / ร่องรอยหลักฐานเชิงประจักษ์ —
+      แทรกภาพถ่ายกิจกรรม เอกสาร หรือรหัสคิวอาร์ลิงก์หลักฐานที่นี่)}%
+  }
+  \end{center}
+  \vspace{6pt}
+}
+
+% ข้อความเตือนตัวเลขสมมุติในตารางตัวอย่าง
+\newcommand{\padisclaimer}[1][ตัวเลขทั้งหมดในตารางนี้เป็นข้อมูลสมมุติ (ตัวอย่าง) เพื่อแสดงวิธีการกรอกและการคำนวณเท่านั้น --- ต้องแทนที่ด้วยข้อมูลจริงก่อนยื่นเอกสาร]{%
+  \begin{center}\textbf{\textcolor{red!70!black}{*** #1 ***}}\end{center}
+}
+
+% บล็อกลงชื่อผู้รายงาน
+% หมายเหตุ: ใส่ {} คั่นหลัง \\ ทุกครั้งก่อนอาร์กิวเมนต์ เพราะถ้าอาร์กิวเมนต์ที่ตามมา
+% ขึ้นต้นด้วย "[" (เช่น "[หน่วยงาน...]") จะถูก \\ ตีความเป็น \\[<ระยะ>] โดยไม่ตั้งใจ
+\newcommand{\pasignatureblock}[3]{%
+  \begin{center}
+  ลงชื่อ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ผู้รายงาน\\[6pt]
+  #1\\{}
+  #2\\{}
+  #3
+  \end{center}
+}
+
+% ---------- ตาราง ----------
+\usepackage{longtable}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{caption}
+\AtBeginDocument{\captionsetup{labelsep=quad, font=normalsize, labelfont=bf}}
+\AtBeginDocument{%
+  \renewcommand{\tablename}{ตารางที่}%
+}
+\definecolor{tblheadgray}{gray}{0.85}
+\newcommand{\tblhead}[1]{\cellcolor{tblheadgray}\textbf{#1}}
+
+% ---------- หัว-ท้ายกระดาษ / เลขหน้า ----------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\bodysize\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[C]{\bodysize\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+}
+
+% ---------- ระบบเลขหน้าพยัญชนะไทย (ก ข ค ...) สำหรับส่วนหน้า (ปก+สารบัญ) ----------
+\usepackage{expl3}
+\ExplSyntaxOn
+\seq_new:N \g_thaifront_letters_seq
+\seq_gset_split:Nnn \g_thaifront_letters_seq { , }
+  {ก,ข,ค,ง,จ,ฉ,ช,ซ,ฌ,ญ,ฎ,ฏ,ฐ,ฑ,ฒ,ณ,ด,ต,ถ,ท,ธ,น,บ,ป,ผ,ฝ,พ,ฟ,ภ,ม,ย,ร,ล,ว,ศ,ษ,ส,ห,ฬ,อ,ฮ}
+\NewDocumentCommand{\ThaiFrontPage}{m}{\seq_item:Nn \g_thaifront_letters_seq {#1}}
+\ExplSyntaxOff
+
+\newcommand{\thaifrontmatter}{%
+  \cleardoublepage
+  \pagenumbering{arabic}
+  \renewcommand{\thepage}{\ThaiFrontPage{\arabic{page}}}%
+}
+\newcommand{\mainbodymatter}{%
+  \cleardoublepage
+  \renewcommand{\thepage}{\arabic{page}}%
+  \pagenumbering{arabic}%
+}
+
+\usepackage{hyperref}
+\hypersetup{hidelinks, bookmarksopen=true, pdfstartview=FitH}
+
+% ---------- สารบัญ ----------
+\AtBeginDocument{\renewcommand{\contentsname}{สารบัญ}}
