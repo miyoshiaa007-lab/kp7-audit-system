@@ -94,13 +94,17 @@ def build_part1_general_info(doc):
 # ---------------------------------------------------------------------------
 
 def build_indicator_block(doc, part_label, domain_title, indicator_no, indicator_title,
-                           num_criteria=5, num_strategies=8, num_source_rows=5):
+                           num_criteria=5, num_strategies=8, num_source_rows=5,
+                           leading_pagebreak=True):
     """
     part_label: เช่น "ส่วนที่ 2"
     domain_title: เช่น "ผลการดำเนินงาน ด้านที่ 1 ด้านทักษะการวางแผนพัฒนาการนิเทศการศึกษา ..."
     indicator_no, indicator_title: เช่น 1, "กระบวนการจัดการเรียนรู้ (ประกันคุณภาพ / การพัฒนาคุณภาพอย่างต่อเนื่อง)"
+    leading_pagebreak: ใส่ False เมื่อบล็อกนี้เป็นเนื้อหาแรกสุดของไฟล์ (เช่น ไฟล์แยกต่อ
+        ตัวชี้วัด) เพื่อไม่ให้มีหน้าว่างเปล่าแทรกอยู่หน้าแรก
     """
-    doc.add_page_break()
+    if leading_pagebreak:
+        doc.add_page_break()
     _center_run(doc, part_label, size=SIZE_H1, bold=True, space_after=2)
     _center_run(doc, domain_title, size=18, bold=True, space_after=2)
     _center_run(doc, f"ตัวชี้วัดที่ {indicator_no}  {indicator_title}", size=18, bold=True, space_after=16)
