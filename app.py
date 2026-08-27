@@ -5,11 +5,11 @@ import re
 import io
 import os
 import tempfile
+import time
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple, Dict, Any
 
-# นำเข้า SDK ตัวใหม่ล่าสุดของ Google
 from google import genai
 from google.genai import types
 import openpyxl
@@ -19,12 +19,14 @@ from openpyxl.styles import PatternFill, Font, Alignment
 # 1. โครงสร้างข้อมูลมาตรฐาน (Strict Schema)
 # ==========================================
 class RecordEntry(BaseModel):
-    date_raw: str = Field(default="", description="วันเดือนปี เช่น '1 เม.ย. 54'")
-    position_and_workplace: str = Field(default="", description="ตำแหน่ง หน่วยงาน")
+    date_raw: str = Field(default="", description="วันเดือนปี เช่น '1 เม.ย. 54' หรือ '1 เม.ย. 2554'")
+    position_and_workplace: str = Field(default="", description="ตำแหน่ง หน่วยงาน เช่น ครู รร.บ้านโคกสูงฯ")
     position_no: Optional[str] = Field(default="", description="เลขที่ตำแหน่ง เช่น 5693, 3332 (สำคัญมาก ต้องดึงมาให้ได้)")
-    academic_standing: Optional[str] = Field(default="", description="วิทยฐานะ เช่น คศ.1, คศ.2, คศ.3, ชำนาญการ, ชำนาญการพิเศษ")
-    salary: Optional[float] = Field(default=0.0, description="อัตราเงินเดือนเป็นตัวเลขเท่านั้น")
+    academic_standing: Optional[str] = Field(default="", description="วิทยฐานะ เช่น ครูชำนาญการ, ครูชำนาญการพิเศษ, คศ.1, คศ.2, คศ.3")
+    salary: Optional[float] = Field(default=0.0, description="อัตราเงินเดือนเป็นตัวเลขเท่านั้น เช่น 25190")
     order_ref: Optional[str] = Field(default="", description="เลขที่คำสั่งและวันที่ลงนาม")
+    percentage_or_step: Optional[str] = Field(default="", description="เปอร์เซ็นต์หรือขั้นการเลื่อน เช่น '0.5 ขั้น', '3.50%', 'ดีเด่น'")
+    reason_for_update: Optional[str] = Field(default="", description="เหตุผลในการอัปเดต เช่น 'แก้ไข', 'ปรับตาม พ.ร.บ.', 'เลื่อนเงินเดือน'")
 
 class KP7ExtractionResult(BaseModel):
     records: list[RecordEntry] = Field(default=[], description="รายการประวัติทั้งหมดเรียงตามลำดับในเอกสาร")
@@ -62,7 +64,7 @@ def sanitize_salary(sal_val: Any) -> float:
     match = re.search(r"(\d+(\.\d+)?)", s_str)
     if match:
         val = float(match.group(1))
-        if val > 0 and val < 5000: return val * 10 
+        if val > 0 and val < 5000: return val * 10
         return val
     return 0.0
 
@@ -80,8 +82,19 @@ def normalize_thai_date(date_str: str) -> Tuple[str, int]:
     if month == 0: return f"{day} {month_raw} {year}", (year * 10000) + day
     return f"{day} {MONTH_LABEL[month]} {year}", (year * 10000) + (month * 100) + day
 
+def identify_update_reason(text: str) -> str:
+    text = str(text)
+    if re.search(r'แก้ไข', text):
+        return 'แก้ไขคำสั่ง'
+    elif re.search(r'พ\.ร\.บ\.|พรบ|ปรับตาม', text):
+        return 'ปรับตาม พ.ร.บ.'
+    elif re.search(r'ชดเชย|ปรับอัตรา', text):
+        return 'ปรับชดเชยมติ ครม.'
+    else:
+        return 'เลื่อนปกติ'
+
 # ==========================================
-# 3. VLM Data Extractor (SDK ใหม่)
+# 3. VLM Data Extractor (SDK ใหม่ + File State Polling)
 # ==========================================
 def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str, hint: str) -> List[Dict[str, Any]]:
     client = genai.Client(api_key=api_key)
@@ -89,12 +102,14 @@ def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str,
     prompt = f"""
     คุณคือผู้เชี่ยวชาญการตรวจสอบทะเบียนประวัติ ก.พ.7 / ก.ค.ศ.16 สพป.มหาสารคาม เขต 2
     ประเภทเอกสาร: {hint}
-    กฎเหล็ก: 
-    1. สกัดข้อมูลประวัติรับเงินเดือนทุกแถว ห้ามข้าม 
+    กฎเหล็ก:
+    1. สกัดข้อมูลประวัติรับเงินเดือนทุกแถว ทุกหน้า ห้ามข้ามเด็ดขาด
     2. หา "เลขที่ตำแหน่ง" (มักเป็นเลข 4-6 หลัก เช่น 5693, 3332) ให้เจอและแยกไว้
     3. หา "วิทยฐานะ" (เช่น ชำนาญการ, ชำนาญการพิเศษ, คศ.1, คศ.2, คศ.3)
     4. ตัวเลขเงินเดือนอารบิก วันที่ตามจริง เลขคำสั่งครบถ้วน
-    5. **ข้อควรระวังปี 2567-2568:** จะมีรายการ "ปรับชดเชยผู้ได้รับผลกระทบ" ในวันที่ "1 พ.ค. 67" และ "1 พ.ค. 68" แทรกเข้ามา ห้ามข้าม และให้อ่านวันที่เป็น 1 พ.ค. ตามจริง
+    5. สกัดหาเปอร์เซ็นต์หรือขั้น เช่น '(0.5 ขั้น)' หรือ '(ร้อยละ 3.50 (ดีเด่น))' ให้อยู่ใน percentage_or_step
+    6. สกัดหาคำว่า 'แก้ไข' หรือ 'ปรับตาม พ.ร.บ.' ให้อยู่ใน reason_for_update
+    7. ข้อควรระวังปี 2567-2568: จะมีรายการ "ปรับชดเชยผู้ได้รับผลกระทบ" ในวันที่ "1 พ.ค. 67" และ "1 พ.ค. 68" แทรกเข้ามา ให้อ่านตามจริง
     """
     
     temp_pdf_path = ""
@@ -106,6 +121,14 @@ def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str,
             
         uploaded_file = client.files.upload(file=temp_pdf_path)
         
+        max_wait = 30
+        waited = 0
+        file_info = client.files.get(name=uploaded_file.name)
+        while getattr(file_info, "state", None) and str(file_info.state).upper() == "PROCESSING" and waited < max_wait:
+            time.sleep(2)
+            waited += 2
+            file_info = client.files.get(name=uploaded_file.name)
+            
         response = client.models.generate_content(
             model=model_name,
             contents=[uploaded_file, prompt],
@@ -137,7 +160,13 @@ def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str,
         r["normalized_date"] = norm_date
         r["sort_key"] = s_key
         r["salary"] = sanitize_salary(r.get("salary", 0))
-        r["original_index"] = idx # เก็บลำดับดั้งเดิมไว้เช็ค Milestone
+        r["original_index"] = idx
+        
+        # เพิ่มเติม: จัดการประเภทการเลื่อนขั้น (ขั้น -> เปอร์เซ็นต์) และเหตุผลการแก้ไข
+        text_context = str(r.get("position_and_workplace", "")) + " " + str(r.get("reason_for_update", ""))
+        if not r.get("reason_for_update"):
+            r["reason_for_update"] = identify_update_reason(text_context)
+            
         extracted_rows.append(r)
         
     return extracted_rows
@@ -149,43 +178,49 @@ def format_milestone_desc(record: dict) -> str:
     desc = f"{record.get('position_and_workplace', '')} "
     pos_no = record.get('position_no', '')
     acad = record.get('academic_standing', '')
+    step = record.get('percentage_or_step', '')
+    reason = record.get('reason_for_update', '')
     
     tags = []
-    if pos_no: tags.append(f"เลขตำแหน่ง: {pos_no}")
+    if pos_no: tags.append(f"เลข: {pos_no}")
     if acad: tags.append(f"วิทยฐานะ: {acad}")
+    if step: tags.append(f"เลื่อน: {step}")
+    if reason and reason != 'เลื่อนปกติ': tags.append(f"ประเภท: {reason}")
     
     tag_str = f"[{' | '.join(tags)}]" if tags else ""
     return f"{desc.strip()} {tag_str} (เงินเดือน {record['salary']:,.0f} บ.) [{record.get('order_ref', '')}]"
 
 def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[Dict[str, Any]]):
-    # ตรวจหา Milestone ใน HRMS (เป็น Ground Truth ด้านลำดับเวลา)
     for i in range(1, len(records_a)):
         prev, curr = records_a[i-1], records_a[i]
-        curr["is_transfer"] = (curr.get("position_no") and prev.get("position_no") and curr.get("position_no") != prev.get("position_no"))
-        curr["is_promotion"] = (curr.get("academic_standing") and prev.get("academic_standing") and curr.get("academic_standing") != prev.get("academic_standing"))
+        curr["is_transfer"] = bool(curr.get("position_no") and prev.get("position_no") and curr.get("position_no") != prev.get("position_no"))
+        curr["is_promotion"] = bool(curr.get("academic_standing") and prev.get("academic_standing") and curr.get("academic_standing") != prev.get("academic_standing"))
 
     matched_rows = []
     stats = {"perfect_match": 0, "duplicate_in_hrms": 0, "missing_in_manual": 0, "missing_in_hrms": 0, "salary_mismatch": 0}
     used_b_indices = set()
 
-    # 1. จับคู่โดยใช้ "ยอดเงินเดือน" เป็น Anchor หลัก (แก้ปัญหาเขียนมือวันที่สลับ)
     for r_a in records_a:
         date_str = r_a["normalized_date"]
         matched_b_idx = None
         
-        # ค้นหาในฝั่ง B (เขียนมือ) ที่เงินเดือนตรงกัน และยังไม่ถูกจับคู่
+        # ค้นหาในฝั่ง B โดยพิจารณายอดเงินเดือนเป็นหลัก แต่เพิ่มการตรวจสอบวันที่เพื่อให้คะแนนความแม่นยำสูงขึ้น
         for idx_b, r_b in enumerate(records_b):
             if idx_b not in used_b_indices and abs(r_a["salary"] - r_b["salary"]) < 1.0:
                 matched_b_idx = idx_b
-                break
+                # ถ้าเจอวันที่ตรงกันด้วย ให้เลือกตัวนี้เลย (เผื่อมีเงินเดือนซ้ำ)
+                if r_a["normalized_date"] == r_b["normalized_date"]:
+                    break
                 
         desc_a = format_milestone_desc(r_a)
         flag_msg = ""
         if r_a.get("is_transfer"): flag_msg += f" 🚩 ย้าย (เลข {r_a.get('position_no')})"
         if r_a.get("is_promotion"): flag_msg += f" 🌟 ปรับวิทยฐานะ ({r_a.get('academic_standing')})"
         
-        # ดักจับคำสั่งปรับชดเชยมติ ครม. 67-68 (แก้ไขการจัดหน้าบรรทัดแล้ว)
-        desc_text = r_a.get("position_and_workplace", "")
+        if r_a.get('reason_for_update') == 'แก้ไขคำสั่ง': flag_msg += " ✏️ แก้ไข"
+        if r_a.get('reason_for_update') == 'ปรับตาม พ.ร.บ.': flag_msg += " ⚖️ ปรับตาม พ.ร.บ."
+        
+        desc_text = str(r_a.get("position_and_workplace", "")) + " " + str(r_a.get("reason_for_update", ""))
         is_compensation = "ชดเชย" in desc_text or "ปรับอัตรา" in desc_text
         if is_compensation or ("1 พ.ค. 2567" in date_str or "1 พ.ค. 2568" in date_str):
             flag_msg += " 💰 ปรับชดเชยมติ ครม."
@@ -195,7 +230,6 @@ def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[
             r_b = records_b[matched_b_idx]
             desc_b = format_milestone_desc(r_b)
             
-            # ถ้ายอดเงินเดือนตรง แต่วันที่ต่างกัน (เกิดจากการจดย้อนหลัง)
             if r_a["normalized_date"] != r_b["normalized_date"]:
                 status = "⚠️ เงินเดือนตรง แต่วันที่เขียนมือคลาดเคลื่อน"
                 action = f"ยึดวันที่ HRMS ({r_a['normalized_date']}) เป็นหลัก"
@@ -218,7 +252,6 @@ def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[
             "สิ่งที่ต้องดำเนินการแก้ไข": action
         })
 
-    # 2. กวาดรายการที่เหลือในเขียนมือ (รายการก่อนปี 54 หรือรายการที่ตกหล่นใน HRMS)
     for idx_b, r_b in enumerate(records_b):
         if idx_b not in used_b_indices:
             matched_rows.append({
@@ -231,7 +264,6 @@ def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[
             })
             stats["missing_in_hrms"] += 1
 
-    # เรียงลำดับผลลัพธ์ตามวันที่ (คร่าวๆ) เพื่อให้อ่านง่าย
     def get_sort_val(row):
         try:
             pts = row["วัน เดือน ปี (HRMS เป็นหลัก)"].split()
@@ -244,12 +276,16 @@ def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[
 
 def generate_audit_excel(table_rows, stats, inv_b) -> io.BytesIO:
     wb = openpyxl.Workbook()
-    ws = wb.active; ws.title = "ผลการเทียบเคียง กพ7"
+    ws = wb.active
+    ws.title = "ผลการเทียบเคียง กพ7"
     ws.append(["ลำดับ", "วัน เดือน ปี (HRMS เป็นหลัก)", "เงินเดือน", "ก.พ.7 อิเล็กทรอนิกส์ (HRMS)", "ก.ค.ศ.16 (เขียนมือ)", "สถานะการตรวจสอบ", "สิ่งที่ต้องดำเนินการแก้ไข"])
     
     header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
     header_font = Font(name="TH Sarabun New", size=14, bold=True, color="FFFFFF")
-    for cell in ws[1]: cell.fill, cell.font, cell.alignment = header_fill, header_font, Alignment(horizontal="center", vertical="center")
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
         
     fill_pass = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
     fill_warn = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
@@ -262,9 +298,12 @@ def generate_audit_excel(table_rows, stats, inv_b) -> io.BytesIO:
             cell.font = row_font
             cell.fill = fill_pass if "ตรงกันสมบูรณ์" in r["สถานะการตรวจสอบ"] else (fill_warn if "⚠️" in r["สถานะการตรวจสอบ"] else fill_error)
 
-    ws.column_dimensions['B'].width, ws.column_dimensions['C'].width = 18
-    ws.column_dimensions['D'].width, ws.column_dimensions['E'].width = 45
-    ws.column_dimensions['F'].width, ws.column_dimensions['G'].width = 30
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 18
+    ws.column_dimensions['D'].width = 45
+    ws.column_dimensions['E'].width = 45
+    ws.column_dimensions['F'].width = 30
+    ws.column_dimensions['G'].width = 30
 
     excel_buffer = io.BytesIO()
     wb.save(excel_buffer)
@@ -275,16 +314,22 @@ def generate_audit_excel(table_rows, stats, inv_b) -> io.BytesIO:
 # 5. Streamlit UI
 # ==========================================
 st.set_page_config(page_title="ระบบตรวจสอบความถูกต้อง ก.พ.7", layout="wide")
-st.title("🎯 ระบบตรวจสอบและเทียบเคียง ก.พ.7 / ก.ค.ศ.16 (Gemini API ตัวใหม่ล่าสุด)")
+st.title("🎯 ระบบตรวจสอบและเทียบเคียง ก.พ.7 / ก.ค.ศ.16 (Gemini API)")
 st.caption("ประมวลผลความเร็วสูงด้วย Native PDF SDK (google-genai) - สพป.มหาสารคาม เขต 2")
 
 with st.sidebar:
     st.header("⚙️ การตั้งค่าระบบ")
     api_key_input = st.text_input("ใส่ Google Gemini API Key:").strip()
     
-    model_list = ["gemini-3.7-flash", "gemini-3.6-flash"]
+    model_list = [
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash"
+    ]
     active_model = st.selectbox("เลือกโมเดล VLM:", model_list, index=0)
-    st.info("แนะนำให้สร้าง API Key จาก Gmail บัญชีใหม่เพื่อหลีกเลี่ยงปัญหา Error 400 ครับ")
+    st.info("หากพบ Error 503 ให้สลับเลือกโมเดลรุ่น Flash หรือ 1.5 เพื่อความเสถียรครับ")
 
 col1, col2 = st.columns(2)
 with col1:
