@@ -251,7 +251,8 @@ with st.sidebar:
     api_key_input = st.text_input("ใส่ Google Gemini API Key:").strip()
     
     # เลือกโมเดลที่รองรับ Structured Output
-    model_list = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    # เลือกโมเดลที่รองรับ Structured Output (อัปเดตเป็นรุ่นล่าสุด)
+    model_list = ["gemini-3.7-flash", "gemini-3.6-flash"]
     active_model = st.selectbox("เลือกโมเดล VLM:", model_list, index=0)
     st.info("แนะนำให้สร้าง API Key จาก Gmail บัญชีใหม่เพื่อหลีกเลี่ยงปัญหา Error 400 ครับ")
 
