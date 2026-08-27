@@ -1,5 +1,5 @@
 streamlit
 pandas
 pydantic
-anthropic
+google-generativeai
 openpyxl
