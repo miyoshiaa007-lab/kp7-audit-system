@@ -11,6 +11,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple, Dict, Any
 
+# นำเข้า Google GenAI SDK รุ่นใหม่ล่าสุด
 from google import genai
 from google.genai import types
 import openpyxl
@@ -21,10 +22,9 @@ from openpyxl.styles import PatternFill, Font, Alignment
 # ==========================================
 st.set_page_config(page_title="e-KP7 Audit System", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
-# ใช้ CSS เพื่อซ่อนกรอบ Markdown ล่องหนและตกแต่ง UI
 st.markdown("""
     <style>
-    /* ลดช่องว่างด้านบนที่เกิดจาก Markdown */
+    /* ซ่อนช่องว่างล่องหนด้านบน */
     .element-container:has(> iframe[title="st.markdown"]) { display: none; }
     .main {background-color: #F8F9FA;}
     h1 {color: #1F4E79; font-weight: 700; margin-top: -1.5rem;}
@@ -34,6 +34,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# ฐานในการคำนวณเงินเดือน ตามเกณฑ์ ก.ค.ศ.
 SALARY_BASES = {
     "คศ.5": {"split": 60840, "upper": 68560, "lower": 60830},
     "คศ.4": {"split": 50330, "upper": 59630, "lower": 50320},
@@ -60,7 +61,7 @@ def calculate_new_salary(old_salary: float, standing_str: str, percent: float) -
     bases = SALARY_BASES[standing]
     base_salary = bases["upper"] if old_salary >= bases["split"] else bases["lower"]
     increment = base_salary * (percent / 100.0)
-    increment_rounded = math.ceil(increment / 10.0) * 10
+    increment_rounded = math.ceil(increment / 10.0) * 10 # ปัดเศษขึ้นเป็นหลักสิบ
     return old_salary + increment_rounded
 
 # ==========================================
@@ -123,7 +124,7 @@ def identify_update_reason(text: str) -> str:
     else: return 'เลื่อนปกติ'
 
 # ==========================================
-# 3. VLM Data Extractor 
+# 3. VLM Data Extractor (SDK API Check)
 # ==========================================
 def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str, hint: str) -> List[Dict[str, Any]]:
     client = genai.Client(api_key=api_key)
@@ -137,21 +138,26 @@ def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str,
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
             temp_pdf.write(pdf_bytes)
             temp_pdf_path = temp_pdf.name
+        
+        # ส่งไฟล์ขึ้น Google GenAI Server
         uploaded_file = client.files.upload(file=temp_pdf_path)
         
+        # รอสถานะไฟล์จนกว่าจะพร้อม (Poling ป้องกัน Error 400/500)
         waited = 0
         file_info = client.files.get(name=uploaded_file.name)
-        while getattr(file_info, "state", None) and str(file_info.state).upper() == "PROCESSING" and waited < 40:
-            time.sleep(2)
-            waited += 2
+        while str(getattr(file_info, "state", "")).upper() in ["PROCESSING", "STATE_PROCESSING"] and waited < 60:
+            time.sleep(3)
+            waited += 3
             file_info = client.files.get(name=uploaded_file.name)
             
+        # สั่งประมวลผลพร้อมจัด Format JSON
         response = client.models.generate_content(
             model=model_name, contents=[uploaded_file, prompt],
             config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=KP7ExtractionResult, temperature=0.0)
         )
         cleaned_str = clean_json_string(response.text)
     finally:
+        # เคลียร์ข้อมูลขยะออกจากระบบ
         if uploaded_file:
             try: client.files.delete(name=uploaded_file.name)
             except: pass
@@ -264,9 +270,19 @@ st.title("🎯 ระบบประมวลผลเทียบเคีย�
 st.caption("พัฒนาเพื่อ สพป.มหาสารคาม เขต 2 (ขับด้วย Gemini GenAI)")
 
 with st.sidebar:
-    st.header("⚙️ การตั้งค่า AI")
-    api_key_input = st.text_input("Gemini API Key:", type="password")
-    active_model = st.selectbox("โมเดลประมวลผล:", ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-3.6-flash"])
+    st.header("⚙️ การตั้งค่า AI (Hybrid Mode)")
+    
+    # ดึง API Key จากหลังบ้าน (สพป.) อัตโนมัติ (ถ้ามี)
+    if "GEMINI_API_KEY" in st.secrets:
+        api_key_input = st.secrets["GEMINI_API_KEY"]
+        st.success("✅ เชื่อมต่อระบบ API ของ สพป. เรียบร้อยแล้ว (พร้อมแชร์ลิงก์ให้ทีมงานใช้ได้เลย)")
+    else:
+        api_key_input = st.text_input("🔑 ใส่ Google Gemini API Key:", type="password")
+
+    # แยกรุ่น AI ทำงานตามความเหมาะสมของไฟล์
+    st.subheader("แยกประมวลผล (ความเร็ว+ความแม่นยำ)")
+    model_hrms = st.selectbox("🤖 อ่านแฟ้มระบบ ก.พ.7 (เน้นไว):", ["gemini-1.5-flash", "gemini-3.6-flash"], index=0)
+    model_man = st.selectbox("🧠 แกะลายมือ ก.ค.ศ.16 (เน้นแม่น):", ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-3.6-flash"], index=0)
     st.info("💡 นำเข้าข้อมูลการประเมินเงินเดือนตามฐานการคำนวณของ ก.ค.ศ. เรียบร้อยแล้ว")
 
 tab1, tab2, tab3 = st.tabs(["📂 1. อัปโหลดเอกสาร", "📊 2. ผลการตรวจสอบ", "📥 3. สรุป & ดาวน์โหลด"])
@@ -280,26 +296,25 @@ with tab1:
 
 if start_btn:
     if not api_key_input or not file_hrms or not file_manual:
-        st.error("⚠️ กรุณากรอก API Key และอัปโหลดไฟล์ให้ครบทั้ง 2 ช่องครับ")
+        st.error("⚠️ กรุณากรอกข้อมูล/อัปโหลดไฟล์ให้ครบทั้ง 2 ช่องครับ")
     else:
         with st.spinner('⏳ AI กำลังสกัดและวิเคราะห์ข้อมูล... (อาจใช้เวลา 1-2 นาที)'):
             try:
-                # 1. บังคับให้ไฟล์ระบบ (HRMS) ใช้รุ่น 1.5-flash เสมอ เพื่อความเร็วสูงสุดและประหยัดโควต้า
-                fast_model = "gemini-1.5-flash"
-                status_box.write(f"📄 1/2 อ่าน ก.พ.7 อิเล็กทรอนิกส์ (ความเร็วสูงด้วย {fast_model})...")
-                rec_hrms = extract_pdf_records_precise(file_hrms.read(), api_key_input, fast_model, "ก.พ.7 อิเล็กทรอนิกส์")
+                status_box = st.empty()
+                status_box.info(f"📄 1/2 กำลังสกัดข้อมูลแฟ้มประวัติจากระบบ (ใช้ {model_hrms})...")
+                rec_hrms = extract_pdf_records_precise(file_hrms.read(), api_key_input, model_hrms, "ก.พ.7 อิเล็กทรอนิกส์")
                 
-                # 2. ให้ไฟล์เขียนมือ (ก.ค.ศ.16) ใช้โมเดลความฉลาดสูงตามที่คุณเลือกจาก Sidebar
-                status_box.write(f"✍️ 2/2 อ่าน ก.ค.ศ.16 เขียนมือ (แกะลายมือด้วย {active_model})...")
-                rec_man = extract_pdf_records_precise(file_manual.read(), api_key_input, active_model, "ก.ค.ศ.16 เขียนมือ")
+                status_box.info(f"✍️ 2/2 กำลังแกะลายมือเล่มประวัติ ก.ค.ศ.16 (ใช้ {model_man})...")
+                rec_man = extract_pdf_records_precise(file_manual.read(), api_key_input, model_man, "ก.ค.ศ.16 เขียนมือ")
                 
-                status_box.write("⚖️ กำลังเทียบเคียงข้อมูล ดักจับการสลับ และคำนวณฐานเงินเดือน...")
+                status_box.info("⚖️ กำลังเทียบเคียงข้อมูล ดักจับสลับลำดับ และคำนวณฐานเงินเดือน...")
                 comp_results, stats, inversions = run_two_way_reconciliation(rec_hrms, rec_man)
                 
                 st.session_state['results'] = comp_results
                 st.session_state['stats'] = stats
                 st.session_state['inversions'] = inversions
                 st.session_state['run_success'] = True
+                status_box.success("✅ ตรวจสอบเสร็จสมบูรณ์! เชิญดูผลลัพธ์ที่แท็บ '2. ผลการตรวจสอบ' ครับ")
             except Exception as e:
                 st.error(f"❌ ระบบขัดข้อง: {str(e)}")
 
@@ -308,8 +323,11 @@ with tab2:
     if 'run_success' in st.session_state and st.session_state['run_success']:
         st.subheader("ตารางเปรียบเทียบข้อมูล (Smart Reconciliation Table)")
         df = pd.DataFrame(st.session_state['results'])
-        styled_df = df.style.apply(highlight_status, axis=1)
-        st.dataframe(styled_df, use_container_width=True, height=600)
+        if not df.empty:
+            styled_df = df.style.apply(highlight_status, axis=1)
+            st.dataframe(styled_df, use_container_width=True, height=600)
+        else:
+            st.warning("⚠️ ไม่พบข้อมูลที่สกัดได้จากไฟล์ (AI อาจจะอ่านไม่ออก หรือไฟล์ถูกเข้ารหัสไว้)")
         
         if st.session_state['inversions']:
             st.error("⚠️ **พบการจดย้อนหลัง (วันที่สลับลำดับ):**")
@@ -325,7 +343,8 @@ with tab3:
         m2.metric("❌ ขาดในเล่มเขียนมือ", f"{st.session_state['stats']['missing_in_manual']} รายการ")
         m3.metric("❌ ขาดในระบบ HRMS", f"{st.session_state['stats']['missing_in_hrms']} รายการ")
         
-        excel_buf = generate_audit_excel(st.session_state['results'])
-        st.download_button("📥 ดาวน์โหลดรายงานผล (Excel)", data=excel_buf, file_name=f"Audit_Report_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+        if not df.empty:
+            excel_buf = generate_audit_excel(st.session_state['results'])
+            st.download_button("📥 ดาวน์โหลดรายงานผล (Excel)", data=excel_buf, file_name=f"Audit_Report_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
     else:
         st.info("👈 ข้อมูลรายงานสรุปจะแสดงขึ้นที่นี่ หลังจากทำการตรวจสอบเสร็จสิ้นครับ")
