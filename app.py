@@ -8,10 +8,16 @@ import tempfile
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple, Dict, Any
-import google.generativeai as genai
+
+# นำเข้า SDK ตัวใหม่ล่าสุดของ Google
+from google import genai
+from google.genai import types
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 
+# ==========================================
+# 1. โครงสร้างข้อมูลมาตรฐาน (Strict Schema)
+# ==========================================
 class RecordEntry(BaseModel):
     date_raw: str = Field(default="", description="วันเดือนปี เช่น '1 เม.ย. 54'")
     position_and_workplace: str = Field(default="", description="ตำแหน่ง หน่วยงาน วิทยฐานะ หรือการเลื่อนขั้น")
@@ -21,8 +27,11 @@ class RecordEntry(BaseModel):
     order_ref: Optional[str] = Field(default="", description="เลขที่คำสั่งและวันที่ลงนาม")
 
 class KP7ExtractionResult(BaseModel):
-    records: List[RecordEntry] = Field(default=[], description="รายการประวัติทั้งหมดเรียงตามลำดับในเอกสาร")
+    records: list[RecordEntry] = Field(default=[], description="รายการประวัติทั้งหมดเรียงตามลำดับในเอกสาร")
 
+# ==========================================
+# 2. ระบบทำความสะอาดและแปลงข้อมูล
+# ==========================================
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 THAI_MONTHS = {
     "ม.ค.": 1, "มค": 1, "มกราคม": 1, "ก.พ.": 2, "กพ": 2, "กุมภาพันธ์": 2,
@@ -71,15 +80,12 @@ def normalize_thai_date(date_str: str) -> Tuple[str, int]:
     if month == 0: return f"{day} {month_raw} {year}", (year * 10000) + day
     return f"{day} {MONTH_LABEL[month]} {year}", (year * 10000) + (month * 100) + day
 
+# ==========================================
+# 3. VLM Data Extractor (SDK ใหม่)
+# ==========================================
 def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str, hint: str) -> List[Dict[str, Any]]:
-    genai.configure(api_key=api_key)
-    try:
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={"response_mime_type": "application/json", "response_schema": KP7ExtractionResult, "temperature": 0.0}
-        )
-    except:
-        model = genai.GenerativeModel(model_name=model_name, generation_config={"temperature": 0.0})
+    # สร้าง Client แบบใหม่
+    client = genai.Client(api_key=api_key)
     
     prompt = f"""
     คุณคือผู้เชี่ยวชาญการตรวจสอบทะเบียนประวัติ ก.พ.7 / ก.ค.ศ.16 สพป.มหาสารคาม เขต 2
@@ -90,16 +96,30 @@ def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str,
     temp_pdf_path = ""
     uploaded_file = None
     try:
+        # บันทึกไฟล์ PDF ชั่วคราว
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
             temp_pdf.write(pdf_bytes)
             temp_pdf_path = temp_pdf.name
             
-        uploaded_file = genai.upload_file(path=temp_pdf_path, mime_type="application/pdf")
-        resp = model.generate_content([prompt, uploaded_file])
-        cleaned_str = clean_json_string(resp.text)
+        # อัปโหลดไฟล์ด้วย API ใหม่
+        uploaded_file = client.files.upload(file=temp_pdf_path)
+        
+        # สั่งประมวลผลพร้อมกำหนด Schema (Structured Output)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[uploaded_file, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=KP7ExtractionResult,
+                temperature=0.0
+            )
+        )
+        cleaned_str = clean_json_string(response.text)
+        
     finally:
+        # ลบไฟล์ออกจากระบบ Google เมื่อประมวลผลเสร็จ
         if uploaded_file:
-            try: genai.delete_file(uploaded_file.name)
+            try: client.files.delete(name=uploaded_file.name)
             except: pass
         if temp_pdf_path and os.path.exists(temp_pdf_path):
             try: os.remove(temp_pdf_path)
@@ -121,6 +141,9 @@ def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str,
         
     return extracted_rows
 
+# ==========================================
+# 4. Two-Way Reconciliation (Fuzzy Match & Logic Check)
+# ==========================================
 def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[Dict[str, Any]]):
     inversions_b = []
     for i in range(1, len(records_b)):
@@ -216,25 +239,21 @@ def generate_audit_excel(table_rows, stats, inv_b) -> io.BytesIO:
     excel_buffer.seek(0)
     return excel_buffer
 
+# ==========================================
+# 5. Streamlit UI
+# ==========================================
 st.set_page_config(page_title="ระบบตรวจสอบความถูกต้อง ก.พ.7", layout="wide")
-st.title("🎯 ระบบตรวจสอบและเทียบเคียง ก.พ.7 / ก.ค.ศ.16 (Gemini API)")
-st.caption("ประมวลผลความเร็วสูงด้วย Native PDF - สพป.มหาสารคาม เขต 2")
+st.title("🎯 ระบบตรวจสอบและเทียบเคียง ก.พ.7 / ก.ค.ศ.16 (Gemini API ตัวใหม่ล่าสุด)")
+st.caption("ประมวลผลความเร็วสูงด้วย Native PDF SDK (google-genai) - สพป.มหาสารคาม เขต 2")
 
 with st.sidebar:
     st.header("⚙️ การตั้งค่าระบบ")
-    # ผมถอดโหมดซ่อนตัวอักษรออก คุณจะเห็น API Key ของคุณตอนพิมพ์ลงไป ป้องกันการก๊อปปี้มาผิด 100%
-    api_key_input = st.text_input("ใส่ Google Gemini API Key (ขึ้นต้นด้วย AQ...):").strip()
-    active_model = None
-    if api_key_input:
-        try:
-            genai.configure(api_key=api_key_input)
-            model_list = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name.lower()]
-            if model_list:
-                st.success(f"เชื่อมต่อสำเร็จ (พบ {len(model_list)} โมเดล)")
-                default_index = next((i for i, m in enumerate(model_list) if "3.7" in m.lower() or "flash" in m.lower()), 0)
-                active_model = st.selectbox("เลือกโมเดล VLM:", model_list, index=default_index)
-        except Exception as err: 
-            st.error(f"เชื่อมต่อล้มเหลว กรุณาตรวจสอบ API Key อีกครั้ง")
+    api_key_input = st.text_input("ใส่ Google Gemini API Key:").strip()
+    
+    # เลือกโมเดลที่รองรับ Structured Output
+    model_list = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    active_model = st.selectbox("เลือกโมเดล VLM:", model_list, index=0)
+    st.info("แนะนำให้สร้าง API Key จาก Gmail บัญชีใหม่เพื่อหลีกเลี่ยงปัญหา Error 400 ครับ")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -248,7 +267,7 @@ if st.button("🚀 เริ่มประมวลผล (ความเร�
     if not api_key_input or not active_model or not file_hrms or not file_manual:
         st.error("กรุณาใส่ API Key, เลือกโมเดล และอัปโหลดไฟล์ให้ครบ")
     else:
-        status_box = st.status("🔍 กำลังประมวลผล Native PDF ผ่าน Google API...", expanded=True)
+        status_box = st.status("🔍 กำลังประมวลผลผ่าน Google GenAI SDK...", expanded=True)
         try:
             status_box.write("📄 1/2 อ่าน ก.พ.7 อิเล็กทรอนิกส์...")
             records_hrms = extract_pdf_records_precise(file_hrms.read(), api_key_input, active_model, "ก.พ.7 อิเล็กทรอนิกส์")
