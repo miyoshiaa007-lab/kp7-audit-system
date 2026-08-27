@@ -9,6 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple, Dict, Any
 
+# นำเข้า SDK ตัวใหม่ล่าสุดของ Google
 from google import genai
 from google.genai import types
 import openpyxl
@@ -80,7 +81,7 @@ def normalize_thai_date(date_str: str) -> Tuple[str, int]:
     return f"{day} {MONTH_LABEL[month]} {year}", (year * 10000) + (month * 100) + day
 
 # ==========================================
-# 3. VLM Data Extractor 
+# 3. VLM Data Extractor (SDK ใหม่)
 # ==========================================
 def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str, hint: str) -> List[Dict[str, Any]]:
     client = genai.Client(api_key=api_key)
@@ -182,10 +183,11 @@ def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[
         flag_msg = ""
         if r_a.get("is_transfer"): flag_msg += f" 🚩 ย้าย (เลข {r_a.get('position_no')})"
         if r_a.get("is_promotion"): flag_msg += f" 🌟 ปรับวิทยฐานะ ({r_a.get('academic_standing')})"
-    # ดักจับคำสั่งปรับชดเชยมติ ครม. 67-68
-            desc_text = r_a.get("position_and_workplace", "")
-            is_compensation = "ชดเชย" in desc_text or "ปรับอัตรา" in desc_text
-            if is_compensation or ("1 พ.ค. 2567" in date_str or "1 พ.ค. 2568" in date_str):
+        
+        # ดักจับคำสั่งปรับชดเชยมติ ครม. 67-68 (แก้ไขการจัดหน้าบรรทัดแล้ว)
+        desc_text = r_a.get("position_and_workplace", "")
+        is_compensation = "ชดเชย" in desc_text or "ปรับอัตรา" in desc_text
+        if is_compensation or ("1 พ.ค. 2567" in date_str or "1 พ.ค. 2568" in date_str):
             flag_msg += " 💰 ปรับชดเชยมติ ครม."
         
         if matched_b_idx is not None:
