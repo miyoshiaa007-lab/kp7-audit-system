@@ -284,8 +284,16 @@ if start_btn:
     else:
         with st.spinner('⏳ AI กำลังสกัดและวิเคราะห์ข้อมูล... (อาจใช้เวลา 1-2 นาที)'):
             try:
-                rec_hrms = extract_pdf_records_precise(file_hrms.read(), api_key_input, active_model, "ก.พ.7 อิเล็กทรอนิกส์")
+                # 1. บังคับให้ไฟล์ระบบ (HRMS) ใช้รุ่น 1.5-flash เสมอ เพื่อความเร็วสูงสุดและประหยัดโควต้า
+                fast_model = "gemini-1.5-flash"
+                status_box.write(f"📄 1/2 อ่าน ก.พ.7 อิเล็กทรอนิกส์ (ความเร็วสูงด้วย {fast_model})...")
+                rec_hrms = extract_pdf_records_precise(file_hrms.read(), api_key_input, fast_model, "ก.พ.7 อิเล็กทรอนิกส์")
+                
+                # 2. ให้ไฟล์เขียนมือ (ก.ค.ศ.16) ใช้โมเดลความฉลาดสูงตามที่คุณเลือกจาก Sidebar
+                status_box.write(f"✍️ 2/2 อ่าน ก.ค.ศ.16 เขียนมือ (แกะลายมือด้วย {active_model})...")
                 rec_man = extract_pdf_records_precise(file_manual.read(), api_key_input, active_model, "ก.ค.ศ.16 เขียนมือ")
+                
+                status_box.write("⚖️ กำลังเทียบเคียงข้อมูล ดักจับการสลับ และคำนวณฐานเงินเดือน...")
                 comp_results, stats, inversions = run_two_way_reconciliation(rec_hrms, rec_man)
                 
                 st.session_state['results'] = comp_results
