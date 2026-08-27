@@ -3,12 +3,11 @@ import pandas as pd
 import json
 import re
 import io
-import os
-import tempfile
+import base64
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional, Tuple, Dict, Any
-import google.generativeai as genai
+import anthropic
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 
@@ -18,16 +17,13 @@ from openpyxl.styles import PatternFill, Font, Alignment
 class RecordEntry(BaseModel):
     date_raw: str = Field(default="", description="วันเดือนปี เช่น '1 เม.ย. 54'")
     position_and_workplace: str = Field(default="", description="ตำแหน่ง หน่วยงาน วิทยฐานะ หรือการเลื่อนขั้น")
-    position_no: Optional[str] = Field(default="", description="เลขที่ตำแหน่ง เช่น '5693'")
+    position_no: Optional[str] = Field(default="", description="เลขที่ตำแหน่ง")
     academic_standing: Optional[str] = Field(default="", description="วิทยฐานะ")
-    salary: Optional[float] = Field(default=0.0, description="อัตราเงินเดือนเป็นตัวเลขเท่านั้น (เช่น 25190)")
+    salary: Optional[float] = Field(default=0.0, description="อัตราเงินเดือนเป็นตัวเลขเท่านั้น")
     order_ref: Optional[str] = Field(default="", description="เลขที่คำสั่งและวันที่ลงนาม")
 
-class KP7ExtractionResult(BaseModel):
-    records: List[RecordEntry] = Field(default=[], description="รายการประวัติทั้งหมดเรียงตามลำดับในเอกสาร")
-
 # ==========================================
-# 2. ระบบทำความสะอาดและแปลงข้อมูล
+# 2. ระบบทำความสะอาดและแปลงข้อมูล (Accuracy Guardrails)
 # ==========================================
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 THAI_MONTHS = {
@@ -45,13 +41,11 @@ MONTH_LABEL = {
 
 def clean_json_string(raw_text: str) -> str:
     text = raw_text.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if len(lines) > 2 and lines[-1].strip().startswith("```"):
-            text = "\n".join(lines[1:-1])
-        elif len(lines) > 1:
-            text = "\n".join(lines[1:])
-    return text.strip()
+    if "```json" in text:
+        text = text.split("```json")[1].split("```")[0].strip()
+    elif "```" in text:
+        text = text.split("```")[1].strip()
+    return text
 
 def sanitize_salary(sal_val: Any) -> float:
     if sal_val is None: return 0.0
@@ -73,63 +67,74 @@ def normalize_thai_date(date_str: str) -> Tuple[str, int]:
     month_raw = match.group(2).replace(" ", "")
     year_raw = int(match.group(3))
     year = 2500 + year_raw if year_raw < 100 else year_raw
-    month = 0
-    for m_key, m_val in THAI_MONTHS.items():
-        if m_key in month_raw:
-            month = m_val
-            break
+    month = next((m_val for m_key, m_val in THAI_MONTHS.items() if m_key in month_raw), 0)
     if month == 0: return f"{day} {month_raw} {year}", (year * 10000) + day
     return f"{day} {MONTH_LABEL[month]} {year}", (year * 10000) + (month * 100) + day
 
 # ==========================================
-# 3. VLM Data Extractor (Native PDF API) - เร็วและไม่ค้าง
+# 3. VLM Data Extractor (Claude Native PDF API)
 # ==========================================
-def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str, hint: str) -> List[Dict[str, Any]]:
-    genai.configure(api_key=api_key)
-    try:
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={"response_mime_type": "application/json", "response_schema": KP7ExtractionResult, "temperature": 0.0}
-        )
-    except:
-        model = genai.GenerativeModel(model_name=model_name, generation_config={"temperature": 0.0})
+def extract_pdf_records_claude(pdf_bytes: bytes, api_key: str, model_name: str, hint: str) -> List[Dict[str, Any]]:
+    client = anthropic.Anthropic(api_key=api_key)
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
     
     prompt = f"""
     คุณคือผู้เชี่ยวชาญการตรวจสอบทะเบียนประวัติ ก.พ.7 / ก.ค.ศ.16 สพป.มหาสารคาม เขต 2
     ประเภทเอกสาร: {hint}
+    
     กฎเหล็กเพื่อความแม่นยำ 100%:
-    1. สกัดข้อมูลทุกแถว ทุกหน้า ห้ามข้าม
+    1. สกัดข้อมูลประวัติการรับเงินเดือนทุกแถว ทุกหน้า ห้ามข้ามเด็ดขาด
     2. ตัวเลขเงินเดือน (salary) ต้องเป็นตัวเลขอารบิกที่ถูกต้อง ระวังการสับสนเลข 3 กับ 8, 0 กับ 6
     3. วันเดือนปี (date_raw) ถอดตามที่ปรากฏจริง
     4. เอกสารอ้างอิง (order_ref) ให้สกัดเลขที่คำสั่งและวันที่ลงนามมาให้ครบถ้วน
+    
+    ส่งผลลัพธ์เป็นโครงสร้าง JSON ล้วนๆ ในรูปแบบนี้เท่านั้น (ไม่ต้องมีคำอธิบายอื่น):
+    {{
+      "records": [
+        {{
+          "date_raw": "1 เม.ย. 54",
+          "position_and_workplace": "ครู รร.บ้านโคกสูงหนองเสียวหนอง (เลื่อนเงินเดือน 1 ขั้น)",
+          "position_no": "5693",
+          "academic_standing": "ชำนาญการ",
+          "salary": 25190,
+          "order_ref": "คส.สพป.มค.2 ที่ 199/54 ลว. 18 เม.ย. 54"
+        }}
+      ]
+    }}
     """
     
-    temp_pdf_path = ""
-    uploaded_file = None
-    try:
-        # บันทึกไฟล์ PDF ชั่วคราว
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
-            temp_pdf.write(pdf_bytes)
-            temp_pdf_path = temp_pdf.name
-            
-        # อัปโหลดไฟล์เข้า API โดยตรง (Super Fast)
-        uploaded_file = genai.upload_file(path=temp_pdf_path, mime_type="application/pdf")
-        resp = model.generate_content([prompt, uploaded_file])
-        cleaned_str = clean_json_string(resp.text)
-        
-    finally:
-        # ล้างข้อมูลชั่วคราวทิ้งทันที
-        if uploaded_file:
-            try: genai.delete_file(uploaded_file.name)
-            except: pass
-        if temp_pdf_path and os.path.exists(temp_pdf_path):
-            try: os.remove(temp_pdf_path)
-            except: pass
-            
+    response = client.messages.create(
+        model=model_name,
+        max_tokens=8192,
+        temperature=0.0,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_base64
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt
+                    }
+                ]
+            }
+        ]
+    )
+    
+    cleaned_str = clean_json_string(response.content[0].text)
+    
     try:
         data = json.loads(cleaned_str)
         records = data.get("records", [])
-    except:
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการแปล JSON: {str(e)}")
         records = []
         
     extracted_rows = []
@@ -182,8 +187,7 @@ def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[
                     desc_b = f"{r_b['position_and_workplace']} (เงินเดือน {r_b['salary']:,.0f} บ.) [{r_b['order_ref']}]"
                 else:
                     if len(used_b) < len(list_b):
-                        for idx_b in range(len(list_b)):
-                            if idx_b not in used_b: matched_b_idx = idx_b; break
+                        matched_b_idx = next(i for i in range(len(list_b)) if i not in used_b)
                         used_b.add(matched_b_idx)
                         r_b = list_b[matched_b_idx]
                         status, action = "⚠️ วันที่ตรงกันแต่ยอดเงินเดือนไม่ตรง", f"ก.พ.7 ยอด {r_a['salary']:,.0f} vs เขียนมือ {r_b['salary']:,.0f} (โปรดตรวจสอบ)"
@@ -250,22 +254,23 @@ def generate_audit_excel(table_rows, stats, inv_b) -> io.BytesIO:
 # 6. Streamlit UI
 # ==========================================
 st.set_page_config(page_title="ระบบตรวจสอบความถูกต้อง ก.พ.7", layout="wide")
-st.title("🎯 ระบบตรวจสอบและเทียบเคียง ก.พ.7 / ก.ค.ศ.16 ความแม่นยำสูง")
-st.caption("ระบบสกัดข้อมูลด้วย Native PDF VLM - สพป.มหาสารคาม เขต 2")
+st.title("🎯 ระบบตรวจสอบและเทียบเคียง ก.พ.7 / ก.ค.ศ.16 ด้วย Claude API")
+st.caption("ประมวลผลความเร็วสูงผ่าน Native PDF - สพป.มหาสารคาม เขต 2")
 
 with st.sidebar:
     st.header("⚙️ การตั้งค่าระบบ")
-    api_key_input = st.text_input("ใส่ Google Gemini API Key:", type="password")
-    active_model = None
-    if api_key_input:
-        try:
-            genai.configure(api_key=api_key_input)
-            model_list = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name.lower()]
-            if model_list:
-                st.success(f"เชื่อมต่อสำเร็จ (พบ {len(model_list)} โมเดล)")
-                default_index = next((i for i, m in enumerate(model_list) if "3.7" in m.lower() or "flash" in m.lower()), 0)
-                active_model = st.selectbox("เลือกโมเดล VLM:", model_list, index=default_index)
-        except Exception as err: st.error(f"API Key ไม่ถูกต้อง: {str(err)}")
+    api_key_input = st.text_input("ใส่ Anthropic API Key (sk-ant-...):").strip()
+    
+    # รายชื่อโมเดลล่าสุดของ Claude
+    model_list = [
+        "claude-3-5-sonnet-latest",
+        "claude-3-5-haiku-latest",
+        "claude-5-sonnet-202608",
+        "claude-4-5-haiku-202608",
+        "claude-5-mythos-202608",
+        "claude-5-fable-202608"
+    ]
+    active_model = st.selectbox("เลือกโมเดล VLM:", model_list, index=0)
 
 col1, col2 = st.columns(2)
 with col1:
@@ -277,17 +282,19 @@ with col2:
 
 if st.button("🚀 เริ่มประมวลผล (ความเร็วสูง)", type="primary"):
     if not api_key_input or not active_model or not file_hrms or not file_manual:
-        st.error("กรุณาใส่ API Key, เลือกโมเดล และอัปโหลดไฟล์ให้ครบ")
+        st.error("กรุณาใส่ Anthropic API Key และอัปโหลดไฟล์ให้ครบ")
+    elif not api_key_input.startswith("sk-ant-"):
+        st.error("API Key ของ Claude จะต้องขึ้นต้นด้วย 'sk-ant-' กรุณาตรวจสอบอีกครั้ง")
     else:
-        status_box = st.status("🔍 กำลังประมวลผล Native PDF ผ่าน Google API...", expanded=True)
+        status_box = st.status("🔍 กำลังประมวลผล Native PDF ผ่าน Claude API...", expanded=True)
         try:
-            status_box.write("📄 1/2 อ่าน ก.พ.7 อิเล็กทรอนิกส์ (รอประมาณ 5-10 วินาที)...")
-            records_hrms = extract_pdf_records_precise(file_hrms.read(), api_key_input, active_model, "ก.พ.7 อิเล็กทรอนิกส์")
+            status_box.write(f"📄 1/2 อ่าน ก.พ.7 อิเล็กทรอนิกส์ด้วยโมเดล {active_model}...")
+            records_hrms = extract_pdf_records_claude(file_hrms.read(), api_key_input, active_model, "ก.พ.7 อิเล็กทรอนิกส์")
             
-            status_box.write("✍️ 2/2 อ่าน ก.ค.ศ.16 เขียนมือ (รอประมาณ 5-10 วินาที)...")
-            records_man = extract_pdf_records_precise(file_manual.read(), api_key_input, active_model, "ก.ค.ศ.16 เขียนมือ")
+            status_box.write("✍️ 2/2 อ่าน ก.ค.ศ.16 เขียนมือ และถอดรหัสลายมือ...")
+            records_man = extract_pdf_records_claude(file_manual.read(), api_key_input, active_model, "ก.ค.ศ.16 เขียนมือ")
             
-            status_box.write("⚖️ กำลังเทียบเคียงข้อมูล...")
+            status_box.write("⚖️ กำลังเทียบเคียงข้อมูลและตรวจสอบตรรกะ...")
             comp_results, stats_data, inv_man = run_two_way_reconciliation(records_hrms, records_man)
             
             status_box.update(label="✅ ตรวจสอบเสร็จสมบูรณ์!", state="complete", expanded=False)
