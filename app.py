@@ -279,10 +279,17 @@ with st.sidebar:
     else:
         api_key_input = st.text_input("🔑 ใส่ Google Gemini API Key:", type="password")
 
-    # แยกรุ่น AI ทำงานตามความเหมาะสมของไฟล์
+    # แยกรุ่น AI ทำงานตามความเหมาะสมของไฟล์ (อัปเดตตัดรุ่นเก่าทิ้งทั้งหมด)
     st.subheader("แยกประมวลผล (ความเร็ว+ความแม่นยำ)")
-    model_hrms = st.selectbox("🤖 อ่านแฟ้มระบบ ก.พ.7 (เน้นไว):", ["gemini-1.5-flash", "gemini-3.6-flash"], index=0)
-    model_man = st.selectbox("🧠 แกะลายมือ ก.ค.ศ.16 (เน้นแม่น):", ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-3.6-flash"], index=0)
+    model_hrms = st.selectbox("🤖 อ่านแฟ้มระบบ ก.พ.7 (เน้นไว):", [
+        "gemini-3.6-flash", 
+        "gemini-3.7-flash"
+    ], index=0)
+    model_man = st.selectbox("🧠 แกะลายมือ ก.ค.ศ.16 (เน้นแม่น):", [
+        "gemini-3.6-pro",    # <--- ตัวท็อปเรื่องการแกะลายมือและวิเคราะห์ตาราง
+        "gemini-3.6-flash", 
+        "gemini-3.7-flash"
+    ], index=0)
     st.info("💡 นำเข้าข้อมูลการประเมินเงินเดือนตามฐานการคำนวณของ ก.ค.ศ. เรียบร้อยแล้ว")
 
 tab1, tab2, tab3 = st.tabs(["📂 1. อัปโหลดเอกสาร", "📊 2. ผลการตรวจสอบ", "📥 3. สรุป & ดาวน์โหลด"])
