@@ -106,7 +106,6 @@ def extract_pdf_records_claude(pdf_bytes: bytes, api_key: str, model_name: str, 
     response = client.messages.create(
         model=model_name,
         max_tokens=8192,
-        temperature=0.0,
         messages=[
             {
                 "role": "user",
