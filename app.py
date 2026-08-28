@@ -16,6 +16,18 @@ from google import genai
 from google.genai import types
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
+import html as html_lib
+
+# ไลบรารีสำหรับ export PDF/รูปภาพ (ใช้ฟอนต์ไทย Sarabun ที่ฝังมากับโปรเจกต์ใน assets/fonts/
+# เพราะฟอนต์เริ่มต้นของ reportlab และ Pillow ไม่มีสระ/วรรณยุกต์ไทยเลย)
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors as rl_colors
+from reportlab.lib.units import mm
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from PIL import Image, ImageDraw, ImageFont
 
 # ==========================================
 # 0. ตั้งค่าหน้าเว็บ และ CSS (ซ่อนช่องว่างล่องหน)
@@ -384,6 +396,184 @@ def generate_audit_excel(table_rows) -> io.BytesIO:
     return buf
 
 # ==========================================
+# 4.5 Export เป็น PDF / รูปภาพ (นอกเหนือจาก Excel)
+# ==========================================
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
+FONT_REGULAR_PATH = os.path.join(FONT_DIR, "Sarabun-Regular.ttf")
+FONT_BOLD_PATH = os.path.join(FONT_DIR, "Sarabun-Bold.ttf")
+
+def _register_thai_fonts():
+    """ลงทะเบียนฟอนต์ Sarabun (ฟอนต์ราชการไทย สัญญาอนุญาต SIL OFL เปิดให้แจกจ่ายซ้ำได้ฟรี)
+    ให้ reportlab รู้จัก ต้องทำก่อนสร้าง PDF ทุกครั้ง มิเช่นนั้นข้อความไทยจะออกมาเป็นกล่องสี่เหลี่ยม"""
+    if "Sarabun" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("Sarabun", FONT_REGULAR_PATH))
+        pdfmetrics.registerFont(TTFont("Sarabun-Bold", FONT_BOLD_PATH))
+        pdfmetrics.registerFontFamily("Sarabun", normal="Sarabun", bold="Sarabun-Bold")
+
+# ฟอนต์ Sarabun เป็นฟอนต์ข้อความไทยล้วน ไม่มีกลิ่นสัญลักษณ์อีโมจิ (✅❌⚠️ ฯลฯ) ที่ใช้แสดงสถานะบนหน้าจอ
+# ถ้าปล่อยไปตรงๆ ใน PDF/รูปภาพจะกลายเป็นกล่องสี่เหลี่ยม (tofu) จึงต้องแปลงเป็นข้อความวงเล็บแทนก่อนพิมพ์
+_EMOJI_TEXT_MAP = [
+    ("✅", "[ตรงกัน]"), ("❌", "[ขาด]"), ("⚠️", "[ระวัง]"), ("🚩", "[เปลี่ยนตำแหน่ง]"),
+    ("🌟", "[เลื่อนวิทยฐานะ]"), ("✏️", "[แก้ไขคำสั่ง]"), ("💰", "[ปรับชดเชย]"), ("🧮", "[คำนวณ]"),
+]
+_LEFTOVER_EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF️]+")
+
+def _plain_text_for_print(text: Any) -> str:
+    text = str(text or "")
+    for emo, tag in _EMOJI_TEXT_MAP:
+        text = text.replace(emo, tag)
+    text = _LEFTOVER_EMOJI_RE.sub("", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+def generate_audit_pdf(table_rows: list, stats: dict) -> io.BytesIO:
+    """สร้างรายงานผลตรวจสอบเป็น PDF (เหมาะสำหรับพิมพ์/แนบเป็นหลักฐานการตรวจสอบ)"""
+    _register_thai_fonts()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=12*mm, bottomMargin=12*mm, leftMargin=10*mm, rightMargin=10*mm)
+
+    title_style = ParagraphStyle("title", fontName="Sarabun-Bold", fontSize=16, leading=20, textColor=rl_colors.HexColor("#1F4E79"))
+    meta_style = ParagraphStyle("meta", fontName="Sarabun", fontSize=10, leading=14, textColor=rl_colors.HexColor("#555555"))
+    cell_style = ParagraphStyle("cell", fontName="Sarabun", fontSize=8, leading=11)
+    header_style = ParagraphStyle("header", fontName="Sarabun-Bold", fontSize=9, leading=12, textColor=rl_colors.white)
+
+    elements = [
+        Paragraph("รายงานผลการตรวจสอบเทียบเคียง ก.พ.7 / ก.ค.ศ.16", title_style),
+        Paragraph(
+            f"สร้างเมื่อ {datetime.now().strftime('%d/%m/%Y %H:%M')} น. &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"ตรงกันสมบูรณ์ {stats.get('perfect_match', 0)} รายการ &nbsp;&nbsp; "
+            f"ขาดในเขียนมือ {stats.get('missing_in_manual', 0)} รายการ &nbsp;&nbsp; "
+            f"ขาดใน HRMS {stats.get('missing_in_hrms', 0)} รายการ",
+            meta_style,
+        ),
+        Spacer(1, 8),
+    ]
+
+    headers = ["ลำดับ", "วัน เดือน ปี", "เงินเดือน", "ก.พ.7 (HRMS)", "ก.ค.ศ.16 (เขียนมือ)", "สถานะ", "การแก้ไข"]
+    data = [[Paragraph(h, header_style) for h in headers]]
+    row_colors = []
+    for idx, r in enumerate(table_rows, 1):
+        data.append([
+            Paragraph(str(idx), cell_style),
+            Paragraph(html_lib.escape(_plain_text_for_print(r["วัน เดือน ปี"])), cell_style),
+            Paragraph(html_lib.escape(_plain_text_for_print(r["เงินเดือน"])), cell_style),
+            Paragraph(html_lib.escape(_plain_text_for_print(r["HRMS (อิเล็กทรอนิกส์)"])), cell_style),
+            Paragraph(html_lib.escape(_plain_text_for_print(r["ก.ค.ศ.16 (เขียนมือ)"])), cell_style),
+            Paragraph(html_lib.escape(_plain_text_for_print(r["สถานะการตรวจสอบ"])), cell_style),
+            Paragraph(html_lib.escape(_plain_text_for_print(r["สิ่งที่ต้องแก้"])), cell_style),
+        ])
+        status = str(r["สถานะการตรวจสอบ"])
+        if "✅" in status: row_colors.append(rl_colors.HexColor("#E6F4EA"))
+        elif "❌" in status: row_colors.append(rl_colors.HexColor("#FCE8E6"))
+        elif "⚠️" in status: row_colors.append(rl_colors.HexColor("#FEF7E0"))
+        else: row_colors.append(rl_colors.white)
+
+    col_widths = [10*mm, 22*mm, 20*mm, 68*mm, 68*mm, 42*mm, 32*mm]
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1F4E79")),
+        ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#CCCCCC")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    for i, c in enumerate(row_colors, start=1):
+        style_cmds.append(("BACKGROUND", (0, i), (-1, i), c))
+    table.setStyle(TableStyle(style_cmds))
+    elements.append(table)
+
+    doc.build(elements)
+    buf.seek(0)
+    return buf
+
+def _wrap_text_to_width(draw: "ImageDraw.ImageDraw", text: str, font: "ImageFont.FreeTypeFont", max_width: int) -> list:
+    """ตัดบรรทัดข้อความให้พอดีกับความกว้างคอลัมน์ (วัดความกว้างจริงด้วยฟอนต์ที่ใช้วาด)
+    ตัดตามช่องว่างก่อน ถ้าคำเดียวยาวเกินคอลัมน์ก็ตัดเป็นรายตัวอักษรแทนเพื่อไม่ให้ล้นออกนอกช่อง"""
+    lines = []
+    for paragraph in str(text or "").split("\n"):
+        words = paragraph.split(" ")
+        current = ""
+        for w in words:
+            trial = f"{current} {w}".strip()
+            if draw.textlength(trial, font=font) <= max_width:
+                current = trial
+                continue
+            if current:
+                lines.append(current)
+                current = ""
+            buf = ""
+            for ch in w:
+                if draw.textlength(buf + ch, font=font) <= max_width or not buf:
+                    buf += ch
+                else:
+                    lines.append(buf)
+                    buf = ch
+            current = buf
+        lines.append(current)
+    return lines or [""]
+
+def generate_audit_image(table_rows: list, stats: dict) -> io.BytesIO:
+    """สร้างรายงานผลตรวจสอบเป็นรูปภาพ PNG ยาวหนึ่งภาพ (เหมาะสำหรับแนบแชท/ไลน์อย่างรวดเร็ว)"""
+    headers = ["ลำดับ", "วัน เดือน ปี", "เงินเดือน", "ก.พ.7 (HRMS)", "ก.ค.ศ.16 (เขียนมือ)", "สถานะ", "การแก้ไข"]
+    col_widths = [50, 100, 90, 380, 380, 260, 190]
+    pad_x, pad_y, line_h = 8, 6, 20
+    title_h, meta_h = 44, 32
+
+    font = ImageFont.truetype(FONT_REGULAR_PATH, 15)
+    font_bold = ImageFont.truetype(FONT_BOLD_PATH, 15)
+    font_title = ImageFont.truetype(FONT_BOLD_PATH, 22)
+
+    scratch = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(scratch)
+
+    rows_plain = [[str(idx)] + [_plain_text_for_print(r[k]) for k in
+                  ["วัน เดือน ปี", "เงินเดือน", "HRMS (อิเล็กทรอนิกส์)", "ก.ค.ศ.16 (เขียนมือ)", "สถานะการตรวจสอบ", "สิ่งที่ต้องแก้"]]
+                  for idx, r in enumerate(table_rows, 1)]
+
+    wrapped_rows, row_heights = [], []
+    for row in rows_plain:
+        wrapped_cells = [_wrap_text_to_width(draw, cell, font, w - 2 * pad_x) for cell, w in zip(row, col_widths)]
+        wrapped_rows.append(wrapped_cells)
+        row_heights.append(max(len(c) for c in wrapped_cells) * line_h + 2 * pad_y)
+
+    total_width = sum(col_widths)
+    total_height = title_h + meta_h + line_h + 2 * pad_y + sum(row_heights) + 20
+    img = Image.new("RGB", (total_width, total_height), "white")
+    draw = ImageDraw.Draw(img)
+
+    draw.text((10, 8), "รายงานผลการตรวจสอบเทียบเคียง ก.พ.7 / ก.ค.ศ.16", font=font_title, fill="#1F4E79")
+    meta_text = (f"สร้างเมื่อ {datetime.now().strftime('%d/%m/%Y %H:%M')} น.  |  "
+                 f"ตรงกันสมบูรณ์ {stats.get('perfect_match', 0)} รายการ  "
+                 f"ขาดในเขียนมือ {stats.get('missing_in_manual', 0)} รายการ  "
+                 f"ขาดใน HRMS {stats.get('missing_in_hrms', 0)} รายการ")
+    draw.text((10, title_h), meta_text, font=font, fill="#555555")
+
+    y = title_h + meta_h
+    x = 0
+    header_h = line_h + 2 * pad_y
+    draw.rectangle([0, y, total_width, y + header_h], fill="#1F4E79")
+    for h, w in zip(headers, col_widths):
+        draw.text((x + pad_x, y + pad_y), h, font=font_bold, fill="white")
+        x += w
+    y += header_h
+
+    status_bg = {"✅": "#E6F4EA", "❌": "#FCE8E6", "⚠️": "#FEF7E0"}
+    for row_idx, (row, wrapped_cells, rh) in enumerate(zip(rows_plain, wrapped_rows, row_heights)):
+        raw_status = table_rows[row_idx]["สถานะการตรวจสอบ"]
+        bg = next((c for mark, c in status_bg.items() if mark in raw_status), "#FFFFFF")
+        draw.rectangle([0, y, total_width, y + rh], fill=bg, outline="#DDDDDD")
+        x = 0
+        for cell_lines, w in zip(wrapped_cells, col_widths):
+            for li, line in enumerate(cell_lines):
+                draw.text((x + pad_x, y + pad_y + li * line_h), line, font=font, fill="#222222")
+            x += w
+        y += rh
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+# ==========================================
 # 5. UI แบบใหม่ (Modern Layout)
 # ==========================================
 st.title("🎯 ระบบประมวลผลเทียบเคียง ก.พ.7 / ก.ค.ศ.16")
@@ -483,7 +673,16 @@ with tab3:
 
         df_tab3 = pd.DataFrame(st.session_state['results'])
         if not df_tab3.empty:
-            excel_buf = generate_audit_excel(st.session_state['results'])
-            st.download_button("📥 ดาวน์โหลดรายงานผล (Excel)", data=excel_buf, file_name=f"Audit_Report_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+            date_tag = datetime.now().strftime('%Y%m%d')
+            dl1, dl2, dl3 = st.columns(3)
+            with dl1:
+                excel_buf = generate_audit_excel(st.session_state['results'])
+                st.download_button("📥 ดาวน์โหลด Excel", data=excel_buf, file_name=f"Audit_Report_{date_tag}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+            with dl2:
+                pdf_buf = generate_audit_pdf(st.session_state['results'], st.session_state['stats'])
+                st.download_button("📄 ดาวน์โหลด PDF", data=pdf_buf, file_name=f"Audit_Report_{date_tag}.pdf", mime="application/pdf", use_container_width=True)
+            with dl3:
+                img_buf = generate_audit_image(st.session_state['results'], st.session_state['stats'])
+                st.download_button("🖼️ ดาวน์โหลดรูปภาพ (PNG)", data=img_buf, file_name=f"Audit_Report_{date_tag}.png", mime="image/png", use_container_width=True)
     else:
         st.info("👈 ข้อมูลรายงานสรุปจะแสดงขึ้นที่นี่ หลังจากทำการตรวจสอบเสร็จสิ้นครับ")
