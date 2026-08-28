@@ -405,8 +405,12 @@ with st.sidebar:
         "gemini-3.6-flash",
         "gemini-3.7-flash"
     ], index=0)
+    # แก้ไข (ยืนยันจากการเรียก API จริง): "gemini-3.6-pro" ไม่มีอยู่จริง ได้ 404 NOT_FOUND
+    # โมเดลระดับ "pro" ที่มีจริงในบัญชีนี้คือ gemini-3.1-pro-preview / gemini-pro-latest
+    # (ทดสอบ gemini-3.1-pro-preview กับไฟล์เขียนมือจริงแล้วสกัดข้อมูลได้ปกติ)
     model_man = st.selectbox("🧠 แกะลายมือ ก.ค.ศ.16 (เน้นแม่น):", [
-        "gemini-3.6-pro",    # <--- ตัวท็อปเรื่องการแกะลายมือและวิเคราะห์ตาราง
+        "gemini-3.1-pro-preview",  # <--- ตัวท็อปเรื่องการแกะลายมือและวิเคราะห์ตาราง (ยืนยันเรียกได้จริง)
+        "gemini-pro-latest",
         "gemini-3.6-flash",
         "gemini-3.7-flash"
     ], index=0)
