@@ -85,7 +85,8 @@ THAI_MONTHS = {"ม.ค.": 1, "มค": 1, "มกราคม": 1, "ก.พ.": 
 MONTH_LABEL = {1: "ม.ค.", 2: "ก.พ.", 3: "มี.ค.", 4: "เม.ย.", 5: "พ.ค.", 6: "มิ.ย.", 7: "ก.ค.", 8: "ส.ค.", 9: "ก.ย.", 10: "ต.ค.", 11: "พ.ย.", 12: "ธ.ค."}
 
 def clean_json_string(raw_text: str) -> str:
-    text = raw_text.strip()
+    if not raw_text: return "{}"
+    text = str(raw_text).strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if len(lines) > 2 and lines[-1].strip().startswith("```"): text = "\n".join(lines[1:-1])
@@ -103,11 +104,11 @@ def sanitize_salary(sal_val: Any) -> float:
     return 0.0
 
 def normalize_thai_date(date_str: str) -> Tuple[str, int]:
-    if not date_str or not isinstance(date_str, str): return "-", 0
+    if not date_str: return "-", 0
     clean_str = str(date_str).translate(THAI_DIGITS).replace(" ", "")
     pattern = r"(\d{1,2})([ก-๙\.]+)(\d{2,4})"
     match = re.search(pattern, clean_str)
-    if not match: return date_str.strip(), 0
+    if not match: return str(date_str).strip(), 0
     day = int(match.group(1))
     month_raw = match.group(2)
     year_raw = int(match.group(3))
@@ -117,10 +118,11 @@ def normalize_thai_date(date_str: str) -> Tuple[str, int]:
     return f"{day} {MONTH_LABEL[month]} {year}", (year * 10000) + (month * 100) + day
 
 def identify_update_reason(text: str) -> str:
-    text = str(text)
-    if re.search(r'แก้ไข', text): return 'แก้ไขคำสั่ง'
-    elif re.search(r'พ\.ร\.บ\.|พรบ|ปรับตาม', text): return 'ปรับตาม พ.ร.บ.'
-    elif re.search(r'ชดเชย|ปรับอัตรา', text): return 'ปรับชดเชยมติ ครม.'
+    if not text: return 'เลื่อนปกติ'
+    text_str = str(text)
+    if re.search(r'แก้ไข', text_str): return 'แก้ไขคำสั่ง'
+    elif re.search(r'พ\.ร\.บ\.|พรบ|ปรับตาม', text_str): return 'ปรับตาม พ.ร.บ.'
+    elif re.search(r'ชดเชย|ปรับอัตรา', text_str): return 'ปรับชดเชยมติ ครม.'
     else: return 'เลื่อนปกติ'
 
 # ==========================================
