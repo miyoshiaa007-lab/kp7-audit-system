@@ -46,6 +46,52 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+def get_secret(key: str, default=None):
+    """อ่านค่า secret จาก st.secrets ก่อน ถ้าไม่มี (เช่นรันบน GitHub Codespaces ที่ไม่มีไฟล์
+    .streamlit/secrets.toml เลย) ให้ลองอ่านจาก environment variable แทน
+    -> st.secrets ที่ยังไม่เคยตั้งค่าไฟล์ secrets.toml เลยจะ raise StreamlitSecretNotFoundError
+       ทันทีที่เช็ค "in" จึงต้องดัก exception ไว้เสมอ ไม่งั้นแอปจะพังตั้งแต่หน้าแรก"""
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.environ.get(key, default)
+
+def require_login():
+    """หน้าจอล็อกอินอย่างง่าย จำกัดให้เฉพาะทีมงานที่รู้รหัสผ่านร่วม (APP_PASSWORD) เข้าใช้งานได้
+    เหมาะกับกลุ่มผู้ใช้เล็กๆ (3-4 คน) ที่ไม่จำเป็นต้องมีระบบสมาชิกเต็มรูปแบบ แต่ป้องกันคนนอกที่
+    ได้ลิงก์แอปไปเข้าถึงข้อมูลเงินเดือน/ประวัติราชการของบุคลากรโดยไม่ได้รับอนุญาต"""
+    if st.session_state.get("authenticated"):
+        return
+
+    app_password = get_secret("APP_PASSWORD")
+    if not app_password:
+        st.title("🔒 ยังไม่ได้ตั้งค่าการเข้าใช้งาน")
+        st.error(
+            "⚠️ ยังไม่ได้ตั้งค่า APP_PASSWORD ใน Secrets ของแอป จึงยังเปิดใช้งานไม่ได้ "
+            "(ป้องกันไม่ให้แอปเปิดสาธารณะโดยไม่ได้ตั้งใจ เพราะมีข้อมูลเงินเดือน/ประวัติราชการของบุคลากรอยู่)\n\n"
+            "ผู้ดูแลระบบ: เพิ่ม `APP_PASSWORD = \"รหัสผ่านทีมงาน\"` ในหน้า Secrets "
+            "(Streamlit Cloud: App settings → Secrets, GitHub Codespaces: Repo Settings → "
+            "Secrets and variables → Codespaces) แล้ว reload หน้านี้ใหม่"
+        )
+        st.stop()
+
+    st.title("🔒 เข้าสู่ระบบ")
+    st.caption("ระบบนี้จำกัดเฉพาะทีมงานที่ได้รับอนุญาตของ สพป.มหาสารคาม เขต 2 เท่านั้น")
+    with st.form("login_form"):
+        pwd = st.text_input("รหัสผ่านทีมงาน", type="password")
+        submitted = st.form_submit_button("เข้าสู่ระบบ", type="primary", use_container_width=True)
+    if submitted:
+        if pwd == app_password:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("❌ รหัสผ่านไม่ถูกต้อง")
+    st.stop()
+
+require_login()
+
 # ฐานในการคำนวณเงินเดือน ตามเกณฑ์ ก.ค.ศ. (ใช้ได้เฉพาะระบบ "อันดับ/ระดับ" แบบ คศ. ปี 2551 เป็นต้นมา
 # เอกสารจริงก่อนหน้านั้น (เช่น อาจารย์ 1 ระดับ 3-6 ปี 2537-2547 ใน otepc63.pdf) ไม่มีคำว่า "คศ." เลย
 # -> normalize_standing จะคืนค่าว่าง และข้ามการตรวจสอบยอดคำนวณให้โดยอัตโนมัติ ซึ่งถูกต้องแล้ว)
@@ -582,12 +628,18 @@ st.caption("พัฒนาเพื่อ สพป.มหาสารคาม
 with st.sidebar:
     st.header("⚙️ การตั้งค่า AI (Hybrid Mode)")
 
-    # ดึง API Key จากหลังบ้าน (สพป.) อัตโนมัติ (ถ้ามี)
-    if "GEMINI_API_KEY" in st.secrets:
-        api_key_input = st.secrets["GEMINI_API_KEY"]
+    # ดึง API Key จากหลังบ้าน (สพป.) อัตโนมัติ (ถ้ามี) — รองรับทั้ง st.secrets (Streamlit Cloud)
+    # และ environment variable (เช่น GitHub Codespaces secrets) ผ่าน get_secret()
+    api_key_input = get_secret("GEMINI_API_KEY")
+    if api_key_input:
         st.success("✅ เชื่อมต่อระบบ API ของ สพป. เรียบร้อยแล้ว (พร้อมแชร์ลิงก์ให้ทีมงานใช้ได้เลย)")
     else:
         api_key_input = st.text_input("🔑 ใส่ Google Gemini API Key:", type="password")
+
+    st.divider()
+    if st.button("🚪 ออกจากระบบ", use_container_width=True):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
     # แยกรุ่น AI ทำงานตามความเหมาะสมของไฟล์ (ตรวจสอบชื่อรุ่นให้ตรงกับที่เปิดให้ใช้งานจริงก่อนใช้งานจริงเสมอ)
     st.subheader("แยกประมวลผล (ความเร็ว+ความแม่นยำ)")
