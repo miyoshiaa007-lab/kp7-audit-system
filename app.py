@@ -85,7 +85,7 @@ THAI_MONTHS = {"ม.ค.": 1, "มค": 1, "มกราคม": 1, "ก.พ.": 
 MONTH_LABEL = {1: "ม.ค.", 2: "ก.พ.", 3: "มี.ค.", 4: "เม.ย.", 5: "พ.ค.", 6: "มิ.ย.", 7: "ก.ค.", 8: "ส.ค.", 9: "ก.ย.", 10: "ต.ค.", 11: "พ.ย.", 12: "ธ.ค."}
 
 def clean_json_string(raw_text: str) -> str:
-    if not raw_text: return "{}"
+    if not raw_text: return "{}" # ดักจับกรณี AI ไม่ส่งข้อความกลับมา
     text = str(raw_text).strip()
     if text.startswith("```"):
         lines = text.splitlines()
@@ -184,10 +184,21 @@ def extract_pdf_records_precise(pdf_bytes: bytes, api_key: str, model_name: str,
 # 4. Smart Reconciliation (แกนหลักประมวลผล)
 # ==========================================
 def format_milestone_desc(record: dict) -> str:
-    desc = f"{record.get('position_and_workplace', '')} "
-    tags = [t for t in [f"เลข:{record.get('position_no', '')}", record.get('academic_standing', ''), f"เลื่อน:{record.get('percentage_or_step', '')}"] if t.strip() and t != "เลข:" and t != "เลื่อน:"]
+    # ใช้ or '' เพื่อเปลี่ยนค่า None ให้เป็นข้อความเปล่าอัตโนมัติ
+    pos = str(record.get('position_and_workplace') or '')
+    pos_no = str(record.get('position_no') or '')
+    acad = str(record.get('academic_standing') or '')
+    pct = str(record.get('percentage_or_step') or '')
+    order = str(record.get('order_ref') or '')
+    salary = float(record.get('salary') or 0.0)
+    
+    desc = f"{pos} "
+    tags_raw = [f"เลข:{pos_no}", acad, f"เลื่อน:{pct}"]
+    # ตัดช่องว่างอย่างปลอดภัย
+    tags = [t.strip() for t in tags_raw if t.strip() and t.strip() not in ["เลข:", "เลื่อน:"]]
     tag_str = f"[{' | '.join(tags)}]" if tags else ""
-    return f"{desc.strip()} {tag_str} (เงินเดือน {record['salary']:,.0f} บ.) [{record.get('order_ref', '')}]"
+    
+    return f"{desc.strip()} {tag_str} (เงินเดือน {salary:,.0f} บ.) [{order}]"
 
 def run_two_way_reconciliation(records_a: List[Dict[str, Any]], records_b: List[Dict[str, Any]]):
     inversions_b = []
