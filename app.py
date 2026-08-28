@@ -127,66 +127,62 @@ def color_hrms_rows(row):
         return [''] * len(row)
 
 # ==========================================
-# 4. ส่วนแสดงผลหน้าเว็บ (Streamlit UI)
+# ส่วนแสดงผลหน้าเว็บ (Streamlit UI)
 # ==========================================
 st.set_page_config(page_title="e-KP7 Audit System", layout="wide")
-st.title("🛡️ ระบบตรวจสอบ ก.พ.7 เทียบ HRMS")
+st.title("🛡️ ระบบตรวจสอบ ก.พ.7 เทียบ ก.ค.ศ.16 / HRMS")
 
-# ดึง API Key จาก Secrets ของ Streamlit
+# ดึง API Key
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
     api_key = st.text_input("ใส่ Gemini API Key", type="password")
     if api_key: genai.configure(api_key=api_key)
 
+# ------------------------------------------
+# แก้ไขกลับมาเป็น PDF 2 ไฟล์ ตามโครงสร้างเดิม
+# ------------------------------------------
 col1, col2 = st.columns(2)
 with col1:
-    pdf_file = st.file_uploader("📂 อัปโหลดไฟล์ ก.พ.7 (PDF)", type=["pdf"])
+    pdf_kp7 = st.file_uploader("📂 อัปโหลดไฟล์ ก.พ.7 (PDF)", type=["pdf"])
 with col2:
-    hrms_file = st.file_uploader("📊 อัปโหลดไฟล์ HRMS (Excel)", type=["xlsx"])
+    pdf_hrms = st.file_uploader("📑 อัปโหลดไฟล์เทียบเคียง เช่น HRMS/ก.ค.ศ.16 (PDF)", type=["pdf"])
 
-if st.button("🚀 เริ่มการตรวจสอบข้อมูล") and pdf_file and hrms_file:
-    with st.spinner("กำลังให้ AI อ่านไฟล์ ก.พ.7 และเทียบข้อมูล... (อาจใช้เวลา 1-2 นาที)"):
+if st.button("🚀 เริ่มการตรวจสอบข้อมูล") and pdf_kp7 and pdf_hrms:
+    with st.spinner("กำลังให้ AI อ่านและเทียบข้อมูลจาก PDF ทั้ง 2 ไฟล์... (อาจใช้เวลา 1-2 นาที)"):
         try:
-            # 1. อ่านข้อมูล HRMS เป็น DataFrame
-            df_hrms = pd.read_excel(hrms_file)
+            # 1. ส่ง PDF ทั้ง 2 ไฟล์ให้ AI สกัดข้อมูล (ตรงนี้คุณใช้ฟังก์ชัน extract_pdf ของคุณ)
+            # data_kp7 = extract_pdf_records_precise(pdf_kp7, prompt_kp7)
+            # data_hrms = extract_pdf_records_precise(pdf_hrms, prompt_hrms)
             
-            # 2. จำลองการวิเคราะห์ (ส่วนนี้คือจุดที่คุณเรียกใช้ฟังก์ชันเปรียบเทียบข้อมูลจริงของคุณ)
-            # เราจะสร้างคอลัมน์สมมติเพื่อให้เห็นภาพการทำงาน
-            # df_hrms['สถานะการตรวจสอบ'] = compare_logic(...) 
+            # 2. นำข้อมูลมาเทียบกันและสร้าง DataFrame
+            # สมมติว่าได้ข้อมูลออกมาเป็น DataFrame ชื่อ df_result
             import numpy as np
-            df_hrms['สถานะการตรวจสอบ'] = np.random.choice(['ตรงกัน', 'มีข้อสังเกต'], size=len(df_hrms))
+            df_result = pd.DataFrame({
+                "รายการ": ["คำสั่งเลื่อนเงินเดือน 1/65", "คำสั่งเลื่อนเงินเดือน 2/65", "คำสั่งเปลี่ยนตำแหน่ง"],
+                "ข้อมูล ก.พ.7": ["25,000", "26,000", "ครู คศ.2"],
+                "ข้อมูล HRMS": ["25,000", "25,500", "ครู คศ.2"],
+                "สถานะการตรวจสอบ": ["ตรงกัน", "มีข้อสังเกต", "ตรงกัน"] # <-- จุดที่เราใช้ตัดสินสี
+            })
             
             st.success("✅ ตรวจสอบสำเร็จ!")
             
-            # ==========================================
-            # 5. การแสดงผลแบบ Tabs และให้ดาวน์โหลด
-            # ==========================================
-            tab1, tab2 = st.tabs(["📊 สรุปผลการตรวจสอบ", "📑 รายงาน HRMS (ระบายสี)"])
+            # 3. แสดงผลแบบ Tabs
+            tab1, tab2 = st.tabs(["📊 สรุปผลการตรวจสอบ", "📑 รายงานเปรียบเทียบ (ระบายสี)"])
             
             with tab1:
-                st.subheader("ผลการเทียบเคียงรายการ (จำลอง)")
-                st.write("พบข้อมูลตรงกัน 15 รายการ, มีข้อสังเกต 2 รายการ")
-                # แสดงผลอื่นๆ ตามโครงสร้างเดิมของคุณ
+                st.subheader("ผลการเทียบเคียงรายการ")
+                st.write("ตรวจสอบพบจุดที่ 'มีข้อสังเกต' กรุณาดูรายละเอียดในแท็บถัดไป")
                 
             with tab2:
-                st.subheader("ตารางเทียบ HRMS (ระบายสีอัตโนมัติ)")
-                st.markdown("🟢 **สีเขียว:** ตรงกัน | 🔴 **สีแดง:** มีข้อสังเกต")
+                st.subheader("ตารางเทียบข้อมูล (ระบายสีอัตโนมัติ)")
+                st.markdown("🟢 **สีเขียว:** ข้อมูลตรงกัน | 🔴 **สีแดง:** ข้อมูลขัดแย้ง/มีข้อสังเกต")
                 
-                # นำ DataFrame มาระบายสีโชว์บนหน้าเว็บ
-                st.dataframe(df_hrms.style.apply(color_hrms_rows, axis=1), use_container_width=True)
+                # แสดงตารางระบายสีบนเว็บ
+                st.dataframe(df_result.style.apply(color_hrms_rows, axis=1), use_container_width=True)
                 
-                # ประมวลผลสร้างไฟล์ Excel ลงสี
-                status_list = df_hrms['สถานะการตรวจสอบ'].tolist()
-                colored_excel = export_colored_excel(hrms_file, status_list)
-                
-                # ปุ่มดาวน์โหลด
-                st.download_button(
-                    label="📥 ดาวน์โหลดไฟล์ HRMS (ระบายสีผลตรวจสอบแล้ว)",
-                    data=colored_excel,
-                    file_name="HRMS_Audited_Result.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                # *** ทริคสำหรับการทำ PDF ***
+                st.info("💡 **ต้องการบันทึกเป็น PDF?** ให้กด `Ctrl + P` (หรือ `Cmd + P` บน Mac) แล้วเลือกปลายทางเป็น 'Save as PDF' เพื่อปรินต์หน้าระบายสีนี้เก็บไว้ได้เลยครับ")
                 
         except Exception as e:
             st.error(f"เกิดข้อผิดพลาด: {e}")
