@@ -1,0 +1,147 @@
+% =============================================================================
+% preamble.tex — การตั้งค่าส่วนหัวสำหรับ "รายงานวิจัย 5 บท" ตามมาตรฐานวิชาการไทย
+% คอมไพล์ด้วย XeLaTeX หรือ LuaLaTeX เท่านั้น (ต้องใช้ fontspec + polyglossia)
+% =============================================================================
+
+% ---------- ฟอนต์ภาษาไทย ----------
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{thai}
+\setotherlanguage{english}
+
+% เปิดใช้การตัดคำภาษาไทยแบบพจนานุกรมของ XeTeX (ICU) — จำเป็นมาก!
+% ถ้าไม่เปิด บรรทัดข้อความไทยที่ไม่มีช่องว่าง (พบได้ทั่วไป โดยเฉพาะในช่องตาราง
+% แคบ ๆ) จะไม่ตัดคำเลยและล้นออกนอกกรอบ/คอลัมน์แทนที่จะขึ้นบรรทัดใหม่
+\XeTeXlinebreaklocale "th"
+\XeTeXlinebreakskip = 0pt plus 1pt minus 0.1pt
+
+% ฟอนต์หลัก TH Sarabun New ตามมาตรฐานราชการไทย (มติ ครม.)
+% หากใช้ Overleaf: อัปโหลดไฟล์ฟอนต์ THSarabunNew.ttf / THSarabunNew Bold.ttf ฯลฯ
+% ไปไว้ในโฟลเดอร์ fonts/ ของโปรเจกต์ (ดาวน์โหลดฟรีจาก SIPA/ f0nt.com)
+% หากไม่มีไฟล์ฟอนต์ ให้สลับไปใช้ฟอนต์สำรอง "Sarabun" (มีอยู่แล้วบน Overleaf/Google Fonts)
+% โดยคอมเมนต์บรรทัด TH Sarabun New แล้วเปิดใช้งานบรรทัด Sarabun แทน
+\setmainfont{TH Sarabun New}[
+  Path = fonts/,
+  Extension = .ttf,
+  UprightFont = *,
+  BoldFont = * Bold,
+  ItalicFont = * Italic,
+  BoldItalicFont = * Bold Italic,
+]
+% ทางเลือกสำรอง (ฟอนต์ Sarabun จาก Google Fonts มีอยู่แล้วใน Overleaf บางเทมเพลต):
+% \setmainfont{Sarabun}
+
+\newfontfamily\thsarabun{TH Sarabun New}[Path = fonts/, Extension = .ttf,
+  UprightFont = *, BoldFont = * Bold, ItalicFont = * Italic, BoldItalicFont = * Bold Italic]
+
+% ---------- ขนาดหน้ากระดาษ/ระยะขอบ (ตรงตามไฟล์ตัวอย่างที่แนบ) ----------
+\usepackage[a4paper,
+  top=3.00cm, bottom=2.54cm, left=3.81cm, right=2.54cm,
+  headsep=1.25cm, footskip=1.25cm]{geometry}
+
+% ---------- ขนาดตัวอักษรมาตรฐาน ----------
+% Normal = 16pt, หัวข้อรอง = 18pt ตัวหนา, บทที่ = 20pt ตัวหนา
+\newcommand{\bodysize}{\fontsize{16}{24}\selectfont}
+\newcommand{\hThreeSize}{\fontsize{16}{24}\selectfont\bfseries}
+\newcommand{\hTwoSize}{\fontsize{18}{27}\selectfont\bfseries}
+\newcommand{\hOneSize}{\fontsize{20}{30}\selectfont\bfseries}
+\AtBeginDocument{\bodysize}
+
+% ---------- ระยะบรรทัด/ย่อหน้า ----------
+\usepackage{setspace}
+\setstretch{1.25}
+\usepackage{indentfirst}
+\setlength{\parindent}{1.25cm}
+
+% ---------- หัวข้อบท/หัวข้อย่อย (บทที่ N ให้ขึ้นหน้าใหม่ กึ่งกลาง ตัวหนา 20pt) ----------
+\usepackage{titlesec}
+\renewcommand{\thechapter}{\arabic{chapter}}
+\titleformat{\chapter}[display]
+  {\normalfont\hOneSize\centering}
+  {บทที่ \thechapter}
+  {8pt}
+  {\hOneSize\centering}
+\titlespacing*{\chapter}{0pt}{0pt}{24pt}
+
+\titleformat{\section}
+  {\normalfont\hTwoSize}{\thesection}{0.6em}{}
+\titlespacing*{\section}{0pt}{18pt}{6pt}
+
+\titleformat{\subsection}
+  {\normalfont\hThreeSize}{\thesubsection}{0.6em}{}
+\titlespacing*{\subsection}{0pt}{12pt}{6pt}
+
+% ---------- สารบัญ / คำนำหน้าเอกสาร ----------
+\usepackage{tocloft}
+\renewcommand{\cftchapfont}{\bodysize}
+\renewcommand{\cftsecfont}{\bodysize}
+% ใช้ \AtBeginDocument เพื่อให้ชื่อหัวข้อไทยเหล่านี้ "ทับ" ค่าเริ่มต้นของ polyglossia
+% (polyglossia ตั้งชื่อ \listfigurename ฯลฯ เป็นภาษาไทยของตัวเองตอนเริ่มเอกสารเช่นกัน
+% ถ้าตั้งตรง ๆ ในพรีแอมเบิลเฉย ๆ จะถูก polyglossia ทับกลับ)
+\AtBeginDocument{%
+  \renewcommand{\contentsname}{สารบัญ}%
+  \renewcommand{\listtablename}{สารบัญตาราง}%
+  \renewcommand{\listfigurename}{สารบัญภาพ}%
+  \renewcommand{\bibname}{บรรณานุกรม}%
+  \renewcommand{\appendixname}{ภาคผนวก}%
+}
+
+% ---------- ตาราง/รูปภาพ ----------
+\usepackage{longtable}
+\usepackage{array}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{caption}
+% หมายเหตุ: ใช้คีย์เวิร์ดฟอนต์มาตรฐานของแพ็กเกจ caption (ไม่ใช่มาโครที่มีอาร์กิวเมนต์
+% อย่าง \fontsize{16}{24}) เพราะเมื่อใช้ร่วมกับ longtable (ltcaption) มาโครที่รับ
+% อาร์กิวเมนต์จะทำให้ xelatex ค้าง/รายงาน "Incomplete \iffalse" ได้
+\captionsetup{labelsep=quad, font=normalsize, labelfont=bf}
+\AtBeginDocument{%
+  \renewcommand{\figurename}{ภาพที่}%
+  \renewcommand{\tablename}{ตารางที่}%
+}
+
+\definecolor{tblheadgray}{gray}{0.85}
+\newcommand{\tblhead}[1]{\cellcolor{tblheadgray}\textbf{#1}}
+
+% ---------- หัว-ท้ายกระดาษ / เลขหน้า ----------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\bodysize\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[C]{\bodysize\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+}
+
+% ---------- ระบบเลขหน้าพยัญชนะไทย (ก ข ค ...) สำหรับส่วนหน้า ----------
+% ใช้ค่ารูปแบบ "thaiLetters" แบบเดียวกับที่ Microsoft Word ใช้กับส่วนหน้าของวิทยานิพนธ์ไทย
+\usepackage{expl3}
+\ExplSyntaxOn
+\seq_new:N \g_thaifront_letters_seq
+\seq_gset_split:Nnn \g_thaifront_letters_seq { , }
+  {ก,ข,ค,ง,จ,ฉ,ช,ซ,ฌ,ญ,ฎ,ฏ,ฐ,ฑ,ฒ,ณ,ด,ต,ถ,ท,ธ,น,บ,ป,ผ,ฝ,พ,ฟ,ภ,ม,ย,ร,ล,ว,ศ,ษ,ส,ห,ฬ,อ,ฮ}
+\NewDocumentCommand{\ThaiFrontPage}{m}{\seq_item:Nn \g_thaifront_letters_seq {#1}}
+\ExplSyntaxOff
+
+% เรียกใช้หลังหน้าปก เพื่อเริ่มเลขหน้า ก ข ค ... (นับใหม่จาก 1)
+\newcommand{\thaifrontmatter}{%
+  \cleardoublepage
+  \pagenumbering{arabic}
+  \renewcommand{\thepage}{\ThaiFrontPage{\arabic{page}}}%
+}
+% เรียกใช้ก่อนบทที่ 1 เพื่อเปลี่ยนเป็นเลขอารบิก 1 2 3 ... (นับใหม่จาก 1)
+\newcommand{\mainbodymatter}{%
+  \cleardoublepage
+  \renewcommand{\thepage}{\arabic{page}}%
+  \pagenumbering{arabic}%
+}
+
+% ---------- อ้างอิง ----------
+\usepackage[style=apa, backend=biber]{biblatex}
+\addbibresource{references.bib}
+
+\usepackage{hyperref}
+\hypersetup{hidelinks, bookmarksopen=true, pdfstartview=FitH}

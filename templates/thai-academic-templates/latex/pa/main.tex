@@ -1,0 +1,32 @@
+% =============================================================================
+% main.tex — เทมเพลตผลงานทางวิชาการ / รายงานผลการปฏิบัติงานตามข้อตกลง PA
+% คอมไพล์ด้วย XeLaTeX (Overleaf: Menu > Compiler > XeLaTeX)
+% ลำดับคอมไพล์แนะนำ: xelatex -> xelatex (ไม่จำเป็นต้องใช้ biber/บรรณานุกรมสำหรับ PA)
+% =============================================================================
+\documentclass[12pt,a4paper,oneside]{article}
+\input{preamble}
+
+\begin{document}
+
+% ---------------- หน้าปก (ไม่แสดงเลขหน้า) ----------------
+\input{cover}
+
+% ---------------- ส่วนหน้า: เลขหน้าพยัญชนะไทย ก ข ค ... ----------------
+\thaifrontmatter
+\clearpage
+\tableofcontents
+
+% ---------------- เนื้อหา: เลขหน้าอารบิก 1 2 3 ... ----------------
+\mainbodymatter
+
+\clearpage
+\input{part1_general}
+
+\input{part2_domain1}
+
+\input{part3_domain2}
+
+\clearpage
+\input{appendix}
+
+\end{document}
